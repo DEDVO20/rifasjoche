@@ -46,6 +46,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
   const [selectedMethod, setSelectedMethod] = useState<'nequi' | 'daviplata' | 'bancolombia'>('nequi');
 
   const { user, profile } = useAuth();
+  const { success: toastSuccess, error: toastError, info: toastInfo } = useToast();
   const supabase = createClient();
 
   // Llave única oficial designada (recibe de cualquier entidad / banco)
