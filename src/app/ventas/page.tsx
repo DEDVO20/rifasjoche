@@ -28,7 +28,7 @@ export default function VentasPage() {
   const [selectedProof, setSelectedProof] = useState<{ url: string; order: string; customer: string } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast();
+  const { success: toastSuccess, error: toastError, warning: toastWarning, info: toastInfo } = useToast();
   const supabase = createClient();
 
   // Cargar ventas reales desde Supabase
@@ -164,6 +164,8 @@ export default function VentasPage() {
   const handleApproveOrder = async (orderId: string) => {
     try {
       setActionLoadingId(orderId);
+      toastInfo('Procesando Aprobación', 'Validando pago y despachando boletos con Resend...');
+
       const res = await fetch(`/api/orders/${orderId}/approve`, {
         method: 'POST',
       });
@@ -172,7 +174,10 @@ export default function VentasPage() {
         throw new Error(json.error || 'No se pudo aprobar la orden.');
       }
 
-      toastSuccess('¡Pago Aprobado con Éxito!', json.message || 'Boletos despachados al correo del comprador.');
+      toastSuccess(
+        '¡Pago Aprobado y Boletos Enviados!',
+        json.message || `Boletos despachados exitosamente al correo ${json.customerEmail || ''}.`
+      );
       await loadSalesData();
     } catch (err: any) {
       console.error('Error aprobando orden:', err);

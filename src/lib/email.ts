@@ -122,13 +122,18 @@ export async function sendTicketConfirmationEmail({
     `;
 
     const response = await resend.emails.send({
-      from: 'Rifas Oficiales <onboarding@resend.dev>',
+      from: 'Rifas Oficiales <boletos@rshubs.xyz>',
       to: [to],
       subject: `🎟️ ¡Pago Confirmado! Tus Boletos para ${raffleName} (${orderNumber})`,
       html: htmlContent,
     });
 
-    console.log('Correo enviado exitosamente vía Resend:', response);
+    if (response.error) {
+      console.warn('⚠️ Error devuelto por Resend API:', response.error.message);
+      return { success: false, error: response.error.message };
+    }
+
+    console.log('✅ Correo enviado exitosamente vía Resend:', response);
     return { success: true, response };
   } catch (err: any) {
     console.error('Error enviando correo con Resend:', err);

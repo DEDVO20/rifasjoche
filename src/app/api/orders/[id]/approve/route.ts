@@ -126,9 +126,14 @@ export async function POST(
       },
     });
 
+    const isEmailSent = !emailStatus.startsWith('advertencia') && emailStatus !== 'error_envio';
+    const finalMessage = isEmailSent
+      ? `¡Pago verificado con éxito! Boletos asignados y correo enviado a ${customerEmail}.`
+      : `¡Pago verificado y boletos aprobados! (Nota de envío: ${emailStatus})`;
+
     return NextResponse.json({
       success: true,
-      message: `¡Pago verificado con éxito! Boletos aprobados y correo despachado a ${customerEmail}.`,
+      message: finalMessage,
       orderNumber: order.order_number,
       customerEmail,
       ticketList,
