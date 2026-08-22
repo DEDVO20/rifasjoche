@@ -88,7 +88,27 @@ export async function POST(
         })
       : 'Próximamente';
 
-    // 7. Enviar correo oficial con Resend
+    const raffleId = (order.raffles as any)?.id;
+
+    // 7. Consultar si alguno de los boletos asignados tiene Premio Anticipado / Número Premiado
+    const { data: instantPrizesData } = await supabase
+      .from('raffle_prizes')
+      .select('name, prize_value, rule_value')
+      .eq('raffle_id', raffleId)
+      .eq('rule_type', 'specific_number');
+
+    const matchedInstantPrizes: { number: string; prizeName: string; prizeValue?: number }[] = [];
+    (instantPrizesData || []).forEach((ip: any) => {
+      if (ticketList.includes(ip.rule_value)) {
+        matchedInstantPrizes.push({
+          number: ip.rule_value,
+          prizeName: ip.name,
+          prizeValue: ip.prize_value ? Number(ip.prize_value) : undefined,
+        });
+      }
+    });
+
+    // 8. Enviar correo oficial con Resend
     let emailStatus = 'despachado';
     try {
       const emailResult = await sendTicketConfirmationEmail({
@@ -100,6 +120,7 @@ export async function POST(
         drawDate,
         ticketNumbers: ticketList,
         totalAmount: Number(order.total) || 0,
+        instantWinningPrizes: matchedInstantPrizes,
       });
 
       if (!emailResult.success) {

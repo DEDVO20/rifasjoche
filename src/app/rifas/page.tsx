@@ -53,6 +53,11 @@ export default function GestorRifasPage() {
     },
   ]);
 
+  // Dynamic Números Premiados (Premios Anticipados/Directos)
+  const [instantPrizes, setInstantPrizes] = useState<
+    { number: string; prizeName: string; prizeValue: number }[]
+  >([]);
+
   // Cargar loterías y rifas desde Supabase
   const loadRafflesFromSupabase = useCallback(async () => {
     try {
@@ -144,6 +149,27 @@ export default function GestorRifasPage() {
     setPrizes(updated);
   };
 
+  const handleAddInstantPrize = () => {
+    setInstantPrizes([
+      ...instantPrizes,
+      {
+        number: '',
+        prizeName: '',
+        prizeValue: 500000,
+      },
+    ]);
+  };
+
+  const handleRemoveInstantPrize = (index: number) => {
+    setInstantPrizes(instantPrizes.filter((_, i) => i !== index));
+  };
+
+  const handleInstantPrizeChange = (index: number, field: string, value: any) => {
+    const updated = [...instantPrizes];
+    updated[index] = { ...updated[index], [field]: value };
+    setInstantPrizes(updated);
+  };
+
   const filteredRaffles = raffles.filter((r) => {
     const matchesSearch = r.name.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
@@ -215,16 +241,32 @@ export default function GestorRifasPage() {
         return;
       }
 
-      // 2. Insertar Premios en public.raffle_prizes
+      // 3. Insertar Premios de Sorteo y Números Premiados en public.raffle_prizes
       if (newRaffle) {
-        const prizesToInsert = prizes.map((p) => ({
+        const prizesToInsert: any[] = prizes.map((p) => ({
           raffle_id: newRaffle.id,
           name: p.name,
           prize_type: p.prize_type,
           prize_value: p.prize_value,
           position: p.position,
           rule_type: p.rule_type || 'exact_match',
+          rule_value: null,
         }));
+
+        // Añadir Números Premiados Directos
+        instantPrizes.forEach((ip, idx) => {
+          if (ip.number && ip.prizeName) {
+            prizesToInsert.push({
+              raffle_id: newRaffle.id,
+              name: ip.prizeName,
+              prize_type: 'secondary',
+              prize_value: ip.prizeValue || 0,
+              position: prizes.length + idx + 1,
+              rule_type: 'specific_number',
+              rule_value: ip.number.trim().padStart(4, '0'),
+            });
+          }
+        });
 
         await supabase.from('raffle_prizes').insert(prizesToInsert);
       }
@@ -240,6 +282,7 @@ export default function GestorRifasPage() {
           rule_type: 'exact_match',
         },
       ]);
+      setInstantPrizes([]);
       await loadRafflesFromSupabase();
       toastSuccess('¡Rifa Creada con Éxito!', `La rifa "${formData.name}" ya está disponible en la tienda.`);
     } catch (err: any) {
@@ -537,8 +580,8 @@ export default function GestorRifasPage() {
                     onClick={handleAddPrize}
                     className="px-3 py-1 bg-secondary-container text-on-secondary-container rounded-lg text-xs font-bold hover:bg-secondary-fixed transition-colors flex items-center gap-1"
                   >
-                    <span className="material-symbols-outlined text-[14px]">add</span>
-                    + Agregar Premio Secundario
+                    <span className="material-symbols-outlined text-[15px]">add</span>
+                    Agregar Premio Secundario
                   </button>
                 </div>
 
@@ -600,6 +643,104 @@ export default function GestorRifasPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* 3. Números Premiados y Premios Anticipados */}
+              <div className="space-y-4 bg-surface-container-low p-4 rounded-xl border border-secondary-container/30">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="font-body-md text-body-md font-bold text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-amber-500">stars</span>
+                      3. Números Premiados (Premios Anticipados / Directos)
+                    </h3>
+                    <p className="text-xs text-on-surface-variant">
+                      Asigna números específicos que ganan un premio de inmediato al ser comprados.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddInstantPrize}
+                    className="px-3 py-1.5 bg-amber-500 text-slate-900 rounded-lg text-xs font-bold hover:bg-amber-400 transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">stars</span>
+                    Agregar Número Premiado
+                  </button>
+                </div>
+
+                {instantPrizes.length === 0 ? (
+                  <div className="p-4 bg-surface-container-lowest rounded-xl border border-dashed border-outline-variant/50 text-center text-xs text-on-surface-variant">
+                    No has definido números premiados para esta rifa. Haz clic en <strong>+ Agregar Número Premiado</strong> si deseas premios sorpresa.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {instantPrizes.map((ip, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3.5 bg-surface-container-lowest rounded-xl border border-amber-400/30 space-y-2.5 shadow-sm"
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-amber-100 text-amber-900 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[13px]">award_star</span>
+                            Número Premiado #{idx + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInstantPrize(idx)}
+                            className="text-error hover:underline text-xs font-bold"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-bold text-primary mb-1">
+                              Número Ganador * (ej. 0777)
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              maxLength={4}
+                              placeholder="0777"
+                              value={ip.number}
+                              onChange={(e) => handleInstantPrizeChange(idx, 'number', e.target.value)}
+                              className="w-full px-3 py-1.5 border border-outline-variant rounded-lg font-mono font-bold text-sm bg-surface-container-lowest text-center text-primary"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-medium text-on-surface mb-1">
+                              Premio Directo *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="Ej. Bono $500.000 COP"
+                              value={ip.prizeName}
+                              onChange={(e) => handleInstantPrizeChange(idx, 'prizeName', e.target.value)}
+                              className="w-full px-3 py-1.5 border border-outline-variant rounded-lg text-xs bg-surface-container-lowest"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-medium text-on-surface mb-1">
+                              Valor Estimado (COP)
+                            </label>
+                            <input
+                              type="number"
+                              placeholder="500000"
+                              value={ip.prizeValue || ''}
+                              onChange={(e) =>
+                                handleInstantPrizeChange(idx, 'prizeValue', Number(e.target.value))
+                              }
+                              className="w-full px-3 py-1.5 border border-outline-variant rounded-lg text-xs bg-surface-container-lowest"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Botones Finales */}

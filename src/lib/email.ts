@@ -1,5 +1,11 @@
 import { Resend } from 'resend';
 
+export interface InstantWinningPrize {
+  number: string;
+  prizeName: string;
+  prizeValue?: number;
+}
+
 interface TicketEmailParams {
   to: string;
   customerName: string;
@@ -9,6 +15,7 @@ interface TicketEmailParams {
   drawDate: string;
   ticketNumbers: string[];
   totalAmount: number;
+  instantWinningPrizes?: InstantWinningPrize[];
 }
 
 export async function sendTicketConfirmationEmail({
@@ -20,6 +27,7 @@ export async function sendTicketConfirmationEmail({
   drawDate,
   ticketNumbers,
   totalAmount,
+  instantWinningPrizes = [],
 }: TicketEmailParams) {
   try {
     const apiKey = process.env.RESEND_API_KEY?.trim() || '';
@@ -30,12 +38,42 @@ export async function sendTicketConfirmationEmail({
 
     const resend = new Resend(apiKey);
 
+    const winningNumbersSet = new Set(instantWinningPrizes.map((p) => p.number));
+
     const formattedNumbersHtml = ticketNumbers
-      .map(
-        (num) =>
-          `<span style="display:inline-block; padding:8px 16px; margin:4px; background-color:#1e3a8a; color:#ffffff; font-family:monospace, Courier; font-size:18px; font-weight:bold; border-radius:8px; letter-spacing:2px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">#${num}</span>`
-      )
+      .map((num) => {
+        const isInstantWinner = winningNumbersSet.has(num);
+        if (isInstantWinner) {
+          return `<span style="display:inline-block; padding:10px 18px; margin:5px; background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color:#ffffff; font-family:monospace, Courier; font-size:20px; font-weight:900; border-radius:10px; letter-spacing:2px; box-shadow:0 4px 10px rgba(217,119,6,0.3); border:2px solid #fef3c7;">🌟 #${num}</span>`;
+        }
+        return `<span style="display:inline-block; padding:8px 16px; margin:4px; background-color:#1e3a8a; color:#ffffff; font-family:monospace, Courier; font-size:18px; font-weight:bold; border-radius:8px; letter-spacing:2px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">#${num}</span>`;
+      })
       .join(' ');
+
+    const instantWinningSection =
+      instantWinningPrizes.length > 0
+        ? `
+        <div style="background-color:#fef3c7; border:2px solid #f59e0b; border-radius:12px; padding:20px; text-align:center; margin-bottom:25px;">
+          <span style="font-size:13px; font-weight:900; text-transform:uppercase; letter-spacing:1px; color:#92400e; display:block; margin-bottom:8px;">
+            🎉 ¡FELICIDADES! HAS GANADO PREMIO DIRECTO ANTICIPADO
+          </span>
+          ${instantWinningPrizes
+            .map(
+              (p) => `
+            <div style="margin:6px 0; font-size:15px; color:#78350f;">
+              Boleto <strong>#${p.number}</strong>: <strong>${p.prizeName}</strong> ${
+                p.prizeValue ? `($${p.prizeValue.toLocaleString('es-CO')} COP)` : ''
+              }
+            </div>
+          `
+            )
+            .join('')}
+          <p style="font-size:12px; color:#b45309; margin:8px 0 0 0;">
+            El equipo organizador se pondrá en contacto contigo para coordinar la entrega de tu premio.
+          </p>
+        </div>
+      `
+        : '';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -67,6 +105,8 @@ export async function sendTicketConfirmationEmail({
                     <p style="font-size:15px; line-height:1.6; color:#475569; margin:0 0 25px 0;">
                       Hemos verificado tu comprobante de pago exitosamente. Ya eres parte del sorteo oficial <strong>${raffleName}</strong>. A continuación encontrarás tus boletos asignados:
                     </p>
+
+                    ${instantWinningSection}
 
                     <!-- Ticket Numbers Box -->
                     <div style="background-color:#f1f5f9; border-radius:12px; padding:25px; text-align:center; margin-bottom:30px; border:2px dashed #cbd5e1;">
@@ -124,7 +164,10 @@ export async function sendTicketConfirmationEmail({
     const response = await resend.emails.send({
       from: 'Rifas Oficiales <boletos@rshubs.xyz>',
       to: [to],
-      subject: `🎟️ ¡Pago Confirmado! Tus Boletos para ${raffleName} (${orderNumber})`,
+      subject:
+        instantWinningPrizes.length > 0
+          ? `🎉 ¡FELICIDADES! Pago Confirmado y Boleto Premiado para ${raffleName} (${orderNumber})`
+          : `🎟️ ¡Pago Confirmado! Tus Boletos para ${raffleName} (${orderNumber})`,
       html: htmlContent,
     });
 

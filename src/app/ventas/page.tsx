@@ -44,83 +44,96 @@ export default function VentasPage() {
           status,
           payment_status,
           created_at,
-          profiles (full_name, phone, email),
-          raffles (name),
-          payments (provider, payment_method, status, metadata)
+          profiles (
+            full_name,
+            email,
+            phone
+          ),
+          raffles (
+            name
+          ),
+          payments (
+            provider,
+            metadata,
+            status
+          ),
+          raffle_numbers (
+            number
+          )
         `)
-        .order('created_at', { ascending: false });
+        .order('id', { ascending: false });
 
       if (error) {
-        console.error('Error cargando órdenes de venta:', error);
-        setSales([]);
+        console.error('Error cargando órdenes de Supabase:', error);
         return;
       }
 
       if (data && data.length > 0) {
-        // Cargar boletos asociados a estas órdenes
-        const orderIds = data.map((o: any) => o.id);
-        const { data: ticketsData } = await supabase
-          .from('raffle_numbers')
-          .select('order_id, number')
-          .in('order_id', orderIds);
+        const formattedSales: OrderSale[] = data.map((order: any) => {
+          const rawNumbers = (order.raffle_numbers || []).map((n: any) => n.number);
 
-        const ticketsMap = new Map<number, string[]>();
-        (ticketsData || []).forEach((t: any) => {
-          const list = ticketsMap.get(t.order_id) || [];
-          list.push(t.number);
-          ticketsMap.set(t.order_id, list);
-        });
+          // Extraer datos del perfil o de la metadata del pago (para compras de invitados)
+          const payMeta = order.payments?.[0]?.metadata;
+          const customerName =
+            payMeta?.customer_name ||
+            (order.profiles as any)?.full_name ||
+            'Comprador';
+          const customerPhone =
+            payMeta?.customer_phone ||
+            (order.profiles as any)?.phone ||
+            'Sin teléfono';
+          const customerEmail =
+            payMeta?.customer_email ||
+            (order.profiles as any)?.email ||
+            'Sin correo';
 
-        // Obtener comprobantes desde audit_logs y metadata
-        const orderIdsStr = data.map((o: any) => o.id.toString());
-        const { data: auditData } = await supabase
-          .from('audit_logs')
-          .select('entity_id, details')
-          .in('entity_id', orderIdsStr);
+          const proofUrl =
+            payMeta?.proof_url ||
+            undefined;
 
-        const auditMap = new Map<string, any>();
-        (auditData || []).forEach((a: any) => {
-          if (a.details) {
-            auditMap.set(String(a.entity_id), a.details);
+          const paymentMethod =
+            payMeta?.payment_method === 'pse'
+              ? 'PSE'
+              : payMeta?.payment_key
+              ? `Transferencia (Llave ${payMeta.payment_key})`
+              : order.payments?.[0]?.provider || 'Transferencia';
+
+          let computedStatus: 'approved' | 'pending' | 'rejected' = 'pending';
+          if (order.status === 'confirmed' || order.payment_status === 'approved') {
+            computedStatus = 'approved';
+          } else if (order.status === 'cancelled' || order.status === 'rejected') {
+            computedStatus = 'rejected';
           }
-        });
 
-        const formatted: OrderSale[] = data.map((item: any) => {
-          const numbersList = ticketsMap.get(item.id) || [];
-          const meta = item.payments?.[0]?.metadata;
-          const aDetails = auditMap.get(String(item.id));
-
-          const cName = meta?.customer_name || aDetails?.customer_name || item.profiles?.full_name || 'Cliente Registrado';
-          const cPhone = meta?.customer_phone || aDetails?.customer_phone || item.profiles?.phone || 'No registrado';
-          const cEmail = meta?.customer_email || aDetails?.customer_email || item.profiles?.email || 'No registrado';
-          const proof = meta?.proof_url || aDetails?.proof_url;
+          const formattedDate = new Date(order.created_at).toLocaleString('es-CO', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
 
           return {
-            id: item.id.toString(),
-            orderNumber: item.order_number || `ORD-${item.id}`,
-            customerName: cName,
-            customerPhone: cPhone,
-            customerEmail: cEmail,
-            raffleName: item.raffles?.name || 'Rifa Activa',
-            numbers: numbersList.length > 0 ? numbersList : ['Asignado'],
-            total: Number(item.total) || 0,
-            paymentMethod: item.payments?.[0]?.provider === 'transfiya_nequi' ? 'Transferencia (Llave 3146676688)' : 'Nequi / PSE',
-            proofUrl: proof || undefined,
-            status: item.payment_status === 'approved' || item.status === 'confirmed' ? 'approved' : item.payment_status === 'rejected' || item.status === 'cancelled' ? 'rejected' : 'pending',
-            date: new Date(item.created_at).toLocaleString('es-CO', {
-              dateStyle: 'short',
-              timeStyle: 'short',
-            }),
+            id: order.id.toString(),
+            orderNumber: order.order_number,
+            customerName,
+            customerPhone,
+            customerEmail,
+            raffleName: (order.raffles as any)?.name || 'Sorteo',
+            numbers: rawNumbers,
+            total: Number(order.total) || 0,
+            paymentMethod,
+            proofUrl,
+            status: computedStatus,
+            date: formattedDate,
           };
         });
 
-        setSales(formatted);
+        setSales(formattedSales);
       } else {
         setSales([]);
       }
     } catch (err) {
-      console.error('Excepción al cargar ventas:', err);
-      setSales([]);
+      console.error('Excepción cargando ventas:', err);
     } finally {
       setIsLoading(false);
     }
@@ -155,6 +168,7 @@ export default function VentasPage() {
     const matchesSearch =
       item.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
       item.customerName.toLowerCase().includes(search.toLowerCase()) ||
+      item.customerPhone.toLowerCase().includes(search.toLowerCase()) ||
       item.raffleName.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -213,103 +227,98 @@ export default function VentasPage() {
     .filter((s) => s.status === 'approved')
     .reduce((acc, s) => acc + s.total, 0);
 
-  const approvedCount = sales.filter((s) => s.status === 'approved').length;
   const pendingCount = sales.filter((s) => s.status === 'pending').length;
+  const approvedCount = sales.filter((s) => s.status === 'approved').length;
 
   return (
-    <div className="space-y-6">
-      {/* Header Ejecutivo */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/30 shadow-sm">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* Encabezado */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="font-display-lg text-[28px] md:text-[34px] font-extrabold text-primary tracking-tight">
+          <div className="flex items-center gap-2">
+            <h1 className="font-display-lg text-2xl sm:text-3xl font-extrabold text-primary">
               Ventas y Transacciones
             </h1>
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold ${
-                isRealtime
-                  ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                  : 'bg-amber-500/10 text-amber-600'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full ${isRealtime ? 'bg-emerald-500' : 'bg-amber-500 animate-ping'}`}></span>
-              {isRealtime ? 'En Vivo Supabase' : 'Conectando'}
-            </span>
+            {isRealtime && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                En Vivo
+              </span>
+            )}
           </div>
-          <p className="font-body-md text-sm text-on-surface-variant mt-1">
-            Gestión de pagos, verificación de comprobantes y auditoría de ventas en tiempo real.
+          <p className="font-body-sm text-xs sm:text-sm text-on-surface-variant mt-0.5">
+            Verifica comprobantes y aprueba compras para despachar boletos oficiales al correo.
           </p>
         </div>
+
         <button
-          onClick={() => loadSalesData()}
-          className="bg-primary hover:bg-primary-container text-on-primary px-5 py-2.5 rounded-xl font-bold text-sm shadow-sm hover:shadow transition-all flex items-center gap-2 active:scale-95"
+          onClick={loadSalesData}
+          className="px-3.5 py-2 bg-surface-container-lowest hover:bg-surface-container border border-outline-variant/30 rounded-xl text-primary font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-sm transition-all"
         >
-          <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>
-            refresh
-          </span>
+          <span className="material-symbols-outlined text-[16px]">sync</span>
           Actualizar
         </button>
       </div>
 
       {/* Tarjetas de Métricas de Ventas */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-2">
-          <div className="flex justify-between items-center text-on-surface-variant text-xs font-bold uppercase tracking-wider">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-1.5">
+          <div className="flex justify-between items-center text-on-surface-variant text-[11px] sm:text-xs font-bold uppercase tracking-wider">
             <span>Total Recaudado</span>
-            <span className="material-symbols-outlined text-emerald-600 text-[20px]">payments</span>
+            <span className="material-symbols-outlined text-emerald-600 text-[18px]">payments</span>
           </div>
-          <div className="text-2xl font-extrabold text-primary">
-            ${totalRevenueSum.toLocaleString('es-CO')} COP
+          <div className="text-lg sm:text-2xl font-extrabold text-primary">
+            ${totalRevenueSum.toLocaleString('es-CO')}
           </div>
-          <div className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-            <span className="material-symbols-outlined text-[14px]">check_circle</span>
-            Pagos aprobados en DB
+          <div className="text-[10px] sm:text-xs text-emerald-600 font-semibold flex items-center gap-1">
+            <span className="material-symbols-outlined text-[12px]">check_circle</span>
+            Pagos aprobados
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-2">
-          <div className="flex justify-between items-center text-on-surface-variant text-xs font-bold uppercase tracking-wider">
-            <span>Órdenes Aprobadas</span>
-            <span className="material-symbols-outlined text-emerald-600 text-[20px]">verified</span>
+        <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-1.5">
+          <div className="flex justify-between items-center text-on-surface-variant text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+            <span>Aprobadas</span>
+            <span className="material-symbols-outlined text-emerald-600 text-[18px]">verified</span>
           </div>
-          <div className="text-2xl font-extrabold text-primary">
+          <div className="text-lg sm:text-2xl font-extrabold text-primary">
             {approvedCount}
           </div>
-          <div className="text-xs text-on-surface-variant">
+          <div className="text-[10px] sm:text-xs text-on-surface-variant">
             Boletos confirmados
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-amber-500/30 space-y-2 bg-amber-500/[0.02]">
-          <div className="flex justify-between items-center text-amber-700 text-xs font-bold uppercase tracking-wider">
-            <span>Pendientes de Revisión</span>
-            <span className="material-symbols-outlined text-amber-600 text-[20px]">pending_actions</span>
+        <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-2xl shadow-sm border border-amber-500/30 space-y-1.5 bg-amber-500/[0.02]">
+          <div className="flex justify-between items-center text-amber-700 text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+            <span>Por Verificar</span>
+            <span className="material-symbols-outlined text-amber-600 text-[18px]">pending_actions</span>
           </div>
-          <div className="text-2xl font-extrabold text-amber-700">
+          <div className="text-lg sm:text-2xl font-extrabold text-amber-700">
             {pendingCount}
           </div>
-          <div className="text-xs text-amber-600 font-bold flex items-center gap-1">
-            <span className="material-symbols-outlined text-[14px]">warning</span>
-            Comprobantes por verificar
+          <div className="text-[10px] sm:text-xs text-amber-600 font-bold flex items-center gap-1">
+            <span className="material-symbols-outlined text-[12px]">warning</span>
+            Requieren revisión
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-2">
-          <div className="flex justify-between items-center text-on-surface-variant text-xs font-bold uppercase tracking-wider">
-            <span>Total de Órdenes</span>
-            <span className="material-symbols-outlined text-primary text-[20px]">receipt_long</span>
+        <div className="bg-surface-container-lowest p-4 sm:p-5 rounded-2xl shadow-sm border border-outline-variant/30 space-y-1.5">
+          <div className="flex justify-between items-center text-on-surface-variant text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+            <span>Total Órdenes</span>
+            <span className="material-symbols-outlined text-primary text-[18px]">receipt_long</span>
           </div>
-          <div className="text-2xl font-extrabold text-primary">
+          <div className="text-lg sm:text-2xl font-extrabold text-primary">
             {sales.length}
           </div>
-          <div className="text-xs text-on-surface-variant">
-            Transacciones registradas
+          <div className="text-[10px] sm:text-xs text-on-surface-variant">
+            Registradas
           </div>
         </div>
       </div>
 
       {/* Filtros y Buscador */}
-      <div className="flex flex-col sm:flex-row gap-3 bg-surface-container-lowest p-4 rounded-2xl shadow-sm border border-outline-variant/30">
+      <div className="flex flex-col sm:flex-row gap-2.5 bg-surface-container-lowest p-3 sm:p-4 rounded-2xl shadow-sm border border-outline-variant/30">
         <div className="relative flex-1">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">
             search
@@ -326,7 +335,7 @@ export default function VentasPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-outline-variant rounded-xl bg-surface-container-lowest focus:ring-2 focus:ring-primary text-sm font-bold"
+            className="w-full sm:w-auto px-3 sm:px-4 py-2 border border-outline-variant rounded-xl bg-surface-container-lowest focus:ring-2 focus:ring-primary text-xs sm:text-sm font-bold"
           >
             <option value="all">Todos los estados ({sales.length})</option>
             <option value="pending">⚠️ Pendientes ({pendingCount})</option>
@@ -336,8 +345,179 @@ export default function VentasPage() {
         </div>
       </div>
 
-      {/* Tabla de Ventas y Verificación */}
-      <div className="bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/30 overflow-hidden">
+      {/* 📱 1. VISTA MÓVIL: TARJETAS RESPONSIVAS TÁCTILES (md:hidden) */}
+      <div className="block md:hidden space-y-3.5">
+        {isLoading ? (
+          <div className="bg-surface-container-lowest p-8 rounded-2xl text-center text-primary font-bold shadow-sm border border-outline-variant/30">
+            Cargando órdenes...
+          </div>
+        ) : filteredSales.length > 0 ? (
+          filteredSales.map((sale) => (
+            <div
+              key={sale.id}
+              className={`bg-surface-container-lowest p-4 rounded-2xl shadow-sm border space-y-3.5 transition-all ${
+                sale.status === 'pending'
+                  ? 'border-amber-400/60 bg-amber-500/[0.015]'
+                  : sale.status === 'approved'
+                  ? 'border-emerald-400/40'
+                  : 'border-outline-variant/30'
+              }`}
+            >
+              {/* Encabezado de la Tarjeta Móvil */}
+              <div className="flex justify-between items-start gap-2 border-b border-outline-variant/20 pb-2.5">
+                <div>
+                  <span className="font-mono font-black text-sm text-primary tracking-wide block">
+                    {sale.orderNumber}
+                  </span>
+                  <span className="text-[11px] text-on-surface-variant">{sale.date}</span>
+                </div>
+
+                {/* Badge de Estado Móvil */}
+                <div>
+                  {sale.status === 'approved' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      Aprobado
+                    </span>
+                  ) : sale.status === 'pending' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-50 text-amber-800 border border-amber-300 shadow-sm">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                      </span>
+                      Pendiente
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-50 text-rose-700 border border-rose-300 shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                      Rechazado
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Datos del Cliente y Sorteo */}
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-primary text-sm">{sale.customerName}</span>
+                  <a
+                    href={`https://wa.me/57${sale.customerPhone.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-600 font-bold hover:underline inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">chat</span>
+                    {sale.customerPhone}
+                  </a>
+                </div>
+                <div className="text-on-surface-variant truncate">{sale.customerEmail}</div>
+                <div className="text-primary font-semibold pt-1">
+                  🎟️ <span className="font-bold">{sale.raffleName}</span>
+                </div>
+              </div>
+
+              {/* Boletos Asignados */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant block">
+                  Boletos Asignados ({sale.numbers.length})
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {sale.numbers.map((num) => (
+                    <span
+                      key={num}
+                      className={`px-2 py-0.5 font-mono text-xs rounded-md font-extrabold border ${
+                        sale.status === 'approved'
+                          ? 'bg-secondary-container text-on-secondary-container border-secondary-fixed-dim/30'
+                          : 'bg-amber-500/10 text-amber-800 border-amber-500/30'
+                      }`}
+                    >
+                      #{num}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Monto y Botón Ver Comprobante */}
+              <div className="flex justify-between items-center pt-2 border-t border-outline-variant/20">
+                <div>
+                  <span className="text-[10px] text-on-surface-variant block">Total Pagado</span>
+                  <span className="text-base font-black text-primary">
+                    ${sale.total.toLocaleString('es-CO')} COP
+                  </span>
+                </div>
+
+                {sale.proofUrl ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedProof({
+                        url: sale.proofUrl!,
+                        order: sale.orderNumber,
+                        customer: sale.customerName,
+                      })
+                    }
+                    className="px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-on-primary rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1 border border-primary/20 shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">receipt_long</span>
+                    Ver Comprobante
+                  </button>
+                ) : (
+                  <span className="text-xs text-on-surface-variant/70 italic">Sin comprobante</span>
+                )}
+              </div>
+
+              {/* Botones de Acción Móviles Grandes */}
+              {sale.status === 'pending' ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    disabled={actionLoadingId === sale.id}
+                    onClick={() => handleApproveOrder(sale.id)}
+                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95"
+                  >
+                    {actionLoadingId === sale.id ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Enviando...
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                        Aprobar Pago
+                      </>
+                    )}
+                  </button>
+                  <button
+                    disabled={actionLoadingId === sale.id}
+                    onClick={() => handleRejectOrder(sale.id)}
+                    className="py-2.5 px-3 bg-white text-rose-600 border border-rose-300 hover:bg-rose-50 rounded-xl font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">cancel</span>
+                    Rechazar
+                  </button>
+                </div>
+              ) : sale.status === 'approved' ? (
+                <div className="w-full py-2 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-500/10 border border-emerald-300/80 flex items-center justify-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-emerald-600">
+                    mark_email_read
+                  </span>
+                  Despachado al Correo
+                </div>
+              ) : (
+                <div className="w-full py-1.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 text-center">
+                  Boletos Liberados
+                </div>
+              )}
+            </div>
+          ))
+        ) : (
+          <div className="bg-surface-container-lowest p-8 rounded-2xl text-center text-on-surface-variant shadow-sm border border-outline-variant/30">
+            No se encontraron órdenes registradas.
+          </div>
+        )}
+      </div>
+
+      {/* 🖥️ 2. VISTA ESCRITORIO: TABLA COMPLETA (hidden md:block) */}
+      <div className="hidden md:block bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/30 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
@@ -385,7 +565,7 @@ export default function VentasPage() {
                         {sale.numbers.map((num) => (
                           <span
                             key={num}
-                            className={`px-2 py-0.5 font-raffle-number text-xs rounded-md font-extrabold border ${
+                            className={`px-2 py-0.5 font-mono text-xs rounded-md font-extrabold border ${
                               sale.status === 'approved'
                                 ? 'bg-secondary-container text-on-secondary-container border-secondary-fixed-dim/30'
                                 : 'bg-amber-500/10 text-amber-700 border-amber-500/30'
@@ -415,7 +595,7 @@ export default function VentasPage() {
                       )}
                     </td>
 
-                    {/* 6. Estado (Badge Limpio y Sin Deformaciones) */}
+                    {/* 6. Estado */}
                     <td className="py-4 px-4 text-center">
                       {sale.status === 'approved' ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-sm whitespace-nowrap">
@@ -438,7 +618,7 @@ export default function VentasPage() {
                       )}
                     </td>
 
-                    {/* 7. Acciones de Verificación */}
+                    {/* 7. Acciones */}
                     <td className="py-4 px-4 text-center">
                       {sale.status === 'pending' ? (
                         <div className="flex items-center justify-center gap-2 whitespace-nowrap">
@@ -484,13 +664,13 @@ export default function VentasPage() {
         </div>
       </div>
 
-      {/* MODAL VISOR DE COMPROBANTE DE PAGO */}
+      {/* MODAL VISOR DE COMPROBANTE DE PAGO (100% RESPONSIVE PARA MÓVILES) */}
       {selectedProof && (
-        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-outline-variant/30 space-y-4 animate-in zoom-in-95">
-            <div className="flex justify-between items-center border-b border-outline-variant/20 pb-3">
+        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-outline-variant/30 space-y-4 animate-in zoom-in-95 max-h-[92vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-outline-variant/20 pb-3 flex-shrink-0">
               <div>
-                <h3 className="font-headline-md text-headline-md font-bold text-primary">
+                <h3 className="font-headline-md text-base sm:text-lg font-bold text-primary">
                   Comprobante de Pago
                 </h3>
                 <p className="text-xs text-on-surface-variant">
@@ -499,13 +679,13 @@ export default function VentasPage() {
               </div>
               <button
                 onClick={() => setSelectedProof(null)}
-                className="p-1 rounded-full text-on-surface-variant hover:text-primary"
+                className="p-1.5 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container"
               >
-                <span className="material-symbols-outlined">close</span>
+                <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
 
-            <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-outline-variant/30 bg-surface-container-low p-2 flex items-center justify-center">
+            <div className="flex-1 overflow-y-auto rounded-xl border border-outline-variant/30 bg-surface-container-low p-2 flex items-center justify-center min-h-[300px]">
               {selectedProof.url.toLowerCase().includes('.pdf') || selectedProof.url.startsWith('data:application/pdf') ? (
                 <iframe
                   src={selectedProof.url}
@@ -522,7 +702,7 @@ export default function VentasPage() {
               )}
             </div>
 
-            <div className="flex justify-between items-center pt-2">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-2 pt-2 border-t border-outline-variant/20 flex-shrink-0">
               <a
                 href={selectedProof.url}
                 target="_blank"
@@ -530,11 +710,11 @@ export default function VentasPage() {
                 className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
               >
                 <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                Abrir Archivo en Pantalla Completa
+                Abrir en Pantalla Completa
               </a>
               <button
                 onClick={() => setSelectedProof(null)}
-                className="px-4 py-2 bg-primary text-on-primary rounded-xl font-bold text-xs"
+                className="w-full sm:w-auto px-5 py-2 bg-primary text-on-primary rounded-xl font-bold text-xs"
               >
                 Cerrar Visor
               </button>

@@ -14,6 +14,12 @@ interface PublicPrize {
   ruleText: string;
 }
 
+interface PublicInstantPrize {
+  number: string;
+  prizeName: string;
+  valueText: string;
+}
+
 interface PublicRaffleDetail {
   id: number;
   name: string;
@@ -25,6 +31,7 @@ interface PublicRaffleDetail {
   drawDate: string;
   description: string;
   prizes: PublicPrize[];
+  instantPrizes: PublicInstantPrize[];
 }
 
 export default function PublicTicketSelectionPage({ params }: { params: { slug: string } }) {
@@ -82,13 +89,25 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       const { data, error } = await query.single();
 
       if (!error && data) {
-        const formattedPrizes: PublicPrize[] = (data.raffle_prizes || []).map((p: any) => ({
+        const rawPrizes = data.raffle_prizes || [];
+
+        // 1. Premios de sorteo regulares (Mayor y Secundarios)
+        const regularPrizes = rawPrizes.filter((p: any) => p.rule_type !== 'specific_number');
+        const formattedPrizes: PublicPrize[] = regularPrizes.map((p: any) => ({
           name: p.name || 'Premio de Sorteo',
           type: p.prize_type === 'main' ? 'main' : 'secondary',
           valueText: p.prize_value ? `$${Number(p.prize_value).toLocaleString('es-CO')} COP` : 'Premio Especial',
           ruleText: p.rule_type === 'exact_match'
             ? `Gana con Coincidencia Exacta del premio de ${data.lottery_draws?.lotteries?.name || 'Lotería Oficial'}`
             : `Gana con regla especial ${p.rule_type || 'asociada'}`,
+        }));
+
+        // 2. Números Premiados Directos / Premios Anticipados
+        const instantPrizesRaw = rawPrizes.filter((p: any) => p.rule_type === 'specific_number');
+        const formattedInstantPrizes: PublicInstantPrize[] = instantPrizesRaw.map((p: any) => ({
+          number: p.rule_value || '0000',
+          prizeName: p.name || 'Premio Sorpresa',
+          valueText: p.prize_value ? `$${Number(p.prize_value).toLocaleString('es-CO')} COP` : 'Premio Directo',
         }));
 
         const minQty = data.minimum_numbers_per_order || 1;
@@ -117,6 +136,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               ruleText: `Coincidencia exacta con ${data.lottery_draws?.lotteries?.name || 'Lotería Oficial'}`,
             }
           ],
+          instantPrizes: formattedInstantPrizes,
         };
 
         setRaffle(formattedRaffle);
@@ -332,6 +352,40 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               </div>
             ))}
           </div>
+
+          {/* Números Premiados (Premios Anticipados / Directos) */}
+          {raffle?.instantPrizes && raffle.instantPrizes.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-outline-variant/20 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-amber-500">stars</span>
+                <h4 className="font-headline-md text-base font-bold text-primary">
+                  🎯 Números Premiados (Premios Directos / Anticipados)
+                </h4>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                  ¡Ganan de Inmediato!
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {raffle.instantPrizes.map((ip, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl border border-amber-300/80 shadow-sm flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
+                        Premio Directo
+                      </span>
+                      <h5 className="font-bold text-xs text-slate-900 line-clamp-1">{ip.prizeName}</h5>
+                      <span className="text-xs font-extrabold text-amber-900">{ip.valueText}</span>
+                    </div>
+                    <div className="bg-amber-500 text-slate-950 px-2.5 py-1.5 rounded-lg font-mono font-black text-sm shadow-sm flex-shrink-0">
+                      #{ip.number}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
