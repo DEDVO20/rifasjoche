@@ -9,7 +9,7 @@ export default function HeaderMobile() {
         <span className="material-symbols-outlined">menu</span>
       </button>
       <Link href="/" className="font-headline-md text-headline-md font-extrabold text-primary">
-        LottoWin
+        Joche77
       </Link>
       <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center text-xs font-bold">
         AD

@@ -3,7 +3,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'LottoWin - Sistema de Administración de Rifas',
+  title: 'Joche77 - Sistema de Administración de Rifas',
   description: 'Plataforma para crear, administrar y vender rifas con asignación aleatoria y auditoría.',
 };
 

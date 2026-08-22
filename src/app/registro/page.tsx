@@ -85,7 +85,7 @@ export default function RegistroPage() {
               Crea tu Cuenta Gratis
             </h1>
             <p className="font-body-md text-body-md text-on-surface-variant">
-              Únete a LottoWin para comprar boletos y gestionar tus rifas ganadoras.
+              Únete a Joche77 para comprar boletos y gestionar tus rifas ganadoras.
             </p>
           </div>
 
@@ -284,7 +284,7 @@ export default function RegistroPage() {
       </main>
 
       <footer className="py-6 text-center text-xs text-outline border-t border-outline-variant/10">
-        © 2026 LottoWin - Todos los derechos reservados.
+        © 2026 Joche77 - Todos los derechos reservados.
       </footer>
     </div>
   );

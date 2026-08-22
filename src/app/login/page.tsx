@@ -174,7 +174,7 @@ export default function LoginPage() {
         </Suspense>
       </main>
       <footer className="py-6 text-center text-xs text-outline border-t border-outline-variant/10">
-        © 2026 LottoWin - Todos los derechos reservados.
+        © 2026 Joche77 - Todos los derechos reservados.
       </footer>
     </div>
   );

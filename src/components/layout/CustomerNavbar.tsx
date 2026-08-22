@@ -18,7 +18,7 @@ export default function CustomerNavbar() {
           </div>
           <div>
             <span className="font-headline-md text-headline-md font-extrabold text-primary block leading-tight">
-              LottoWin
+              Joche77
             </span>
             <span className="text-[10px] font-bold text-on-tertiary-container bg-tertiary-fixed-dim/20 px-1.5 py-0.5 rounded">
               Sorteos Oficiales
@@ -30,17 +30,15 @@ export default function CustomerNavbar() {
         <nav className="flex items-center gap-4">
           <Link
             href="/"
-            className={`font-body-md text-body-md font-medium transition-colors ${
-              pathname === '/' || pathname === '/tienda' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
-            }`}
+            className={`font-body-md text-body-md font-medium transition-colors ${pathname === '/' || pathname === '/tienda' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
+              }`}
           >
             Sorteos Disponibles
           </Link>
           <Link
             href="/mis-boletos"
-            className={`font-body-md text-body-md font-medium transition-colors flex items-center gap-1 ${
-              pathname === '/mis-boletos' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
-            }`}
+            className={`font-body-md text-body-md font-medium transition-colors flex items-center gap-1 ${pathname === '/mis-boletos' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
+              }`}
           >
             <span className="material-symbols-outlined text-[18px]">confirmation_number</span>
             Mis Boletos
