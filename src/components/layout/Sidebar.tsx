@@ -8,13 +8,19 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { profile, user, logout } = useAuth();
 
-  // If in store route, don't show admin sidebar
-  if (pathname.startsWith('/tienda') || pathname.startsWith('/mis-boletos')) {
+  // If in store route, login or home, don't show admin sidebar
+  if (
+    pathname === '/' ||
+    pathname.startsWith('/tienda') ||
+    pathname.startsWith('/mis-boletos') ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/registro')
+  ) {
     return null;
   }
 
   const navItems = [
-    { href: '/', label: 'Dashboard', icon: 'dashboard' },
+    { href: '/admin', label: 'Dashboard', icon: 'dashboard' },
     { href: '/rifas', label: 'Rifas', icon: 'qr_code_2' },
     { href: '/ventas', label: 'Ventas', icon: 'payments' },
     { href: '/loterias', label: 'Loterías', icon: 'casino' },

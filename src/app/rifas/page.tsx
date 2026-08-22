@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { RafflePrize } from '@/types/database.types';
+import { useToast } from '@/context/ToastContext';
 import { createClient } from '@/lib/supabase/client';
 
 interface RaffleItem {
@@ -28,6 +29,7 @@ export default function GestorRifasPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [lotteriesList, setLotteriesList] = useState<{ id: string; name: string }[]>([]);
 
+  const { success: toastSuccess, error: toastError, info: toastInfo } = useToast();
   const supabase = createClient();
 
   // Form states for new raffle
@@ -195,7 +197,7 @@ export default function GestorRifasPage() {
 
       if (raffleErr) {
         console.error('Error insertando rifa en Supabase:', raffleErr);
-        alert(`Error al crear rifa: ${raffleErr.message}`);
+        toastError('Error al Crear Rifa', raffleErr.message);
         return;
       }
 
@@ -225,9 +227,10 @@ export default function GestorRifasPage() {
         },
       ]);
       await loadRafflesFromSupabase();
-      alert('Rifa guardada exitosamente en Supabase.');
-    } catch (err) {
+      toastSuccess('¡Rifa Creada con Éxito!', `La rifa "${formData.name}" ya está disponible en la tienda.`);
+    } catch (err: any) {
       console.error('Excepción al crear rifa:', err);
+      toastError('Error Inesperado', err.message);
     }
   };
 
@@ -236,8 +239,10 @@ export default function GestorRifasPage() {
     try {
       await supabase.from('raffles').update({ status: nextStatus }).eq('id', raffleId);
       setRaffles(raffles.map((r) => (r.id === raffleId ? { ...r, status: nextStatus as any } : r)));
-    } catch (err) {
+      toastInfo('Estado Actualizado', `La rifa ahora se encuentra ${nextStatus === 'active' ? 'activa' : 'en pausa'}.`);
+    } catch (err: any) {
       console.error('Error actualizando estado:', err);
+      toastError('Error al Cambiar Estado', err.message);
     }
   };
 

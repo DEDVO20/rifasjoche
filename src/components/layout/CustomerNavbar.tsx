@@ -12,7 +12,7 @@ export default function CustomerNavbar() {
     <header className="sticky top-0 z-[80] bg-surface/90 backdrop-blur-md border-b border-outline-variant/20 shadow-sm">
       <div className="max-w-container-max mx-auto px-4 h-16 flex justify-between items-center">
         {/* Brand */}
-        <Link href="/tienda" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2">
           <div className="w-10 h-10 rounded-xl bg-secondary-container flex items-center justify-center font-extrabold text-on-secondary-container text-lg shadow-sm">
             LW
           </div>
@@ -29,12 +29,12 @@ export default function CustomerNavbar() {
         {/* Links & Auth State */}
         <nav className="flex items-center gap-4">
           <Link
-            href="/tienda"
+            href="/"
             className={`font-body-md text-body-md font-medium transition-colors ${
-              pathname === '/tienda' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
+              pathname === '/' || pathname === '/tienda' ? 'text-primary font-bold' : 'text-on-surface-variant hover:text-primary'
             }`}
           >
-            Rifas Disponibles
+            Sorteos Disponibles
           </Link>
           <Link
             href="/mis-boletos"
@@ -49,7 +49,7 @@ export default function CustomerNavbar() {
           {/* Portal Admin link si es Admin */}
           {(profile?.role === 'admin' || profile?.role === 'super_admin') && (
             <Link
-              href="/"
+              href="/admin"
               className="hidden md:flex items-center gap-1 px-3 py-1.5 border border-outline-variant rounded-lg font-body-sm text-body-sm font-semibold hover:bg-surface-container transition-colors"
             >
               <span className="material-symbols-outlined text-[16px]">admin_panel_settings</span>

@@ -7,10 +7,10 @@ export default function BottomNavMobile() {
   const pathname = usePathname();
 
   const items = [
-    { href: '/', label: 'Dashboard', icon: 'dashboard' },
+    { href: '/admin', label: 'Dashboard', icon: 'dashboard' },
     { href: '/rifas', label: 'Rifas', icon: 'qr_code_2' },
     { href: '/ventas', label: 'Ventas', icon: 'payments' },
-    { href: '/perfil', label: 'Perfil', icon: 'person' },
+    { href: '/loterias', label: 'Loterías', icon: 'casino' },
   ];
 
   return (

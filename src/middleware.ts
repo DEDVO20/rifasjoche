@@ -34,29 +34,27 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Rutas de tienda / cliente
-  const isCustomerRoute =
-    pathname.startsWith('/tienda') ||
-    pathname.startsWith('/mis-boletos');
+  // Rutas administrativas protegidas
+  const isAdminRoute =
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/ventas') ||
+    pathname.startsWith('/rifas') ||
+    pathname.startsWith('/loterias') ||
+    pathname.startsWith('/auditoria');
 
   // Rutas públicas de autenticación y estáticos
-  const isPublicAuthRoute =
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/registro') ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
-    pathname.includes('.');
+  const isAuthRoute = pathname === '/login' || pathname === '/registro';
 
-  // 1. Si NO está logueado e intenta ir a una ruta de admin (ej: '/')
-  if (!user && !isCustomerRoute && !isPublicAuthRoute) {
+  // 1. Si NO está autenticado e intenta acceder a una ruta de administración -> Redirigir a /login
+  if (!user && isAdminRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirect', pathname);
     return NextResponse.redirect(url);
   }
 
-  // 2. Si SI está logueado, consultar su rol para control estricto de rutas
-  if (user && !isPublicAuthRoute) {
+  // 2. Si SÍ está autenticado
+  if (user) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
@@ -65,31 +63,17 @@ export async function middleware(request: NextRequest) {
 
     const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
-    // A) Si intenta ir a /login o /registro estando autenticado
-    if (pathname === '/login' || pathname === '/registro') {
+    // A) Si intenta ir a /login o /registro ya estando autenticado
+    if (isAuthRoute) {
       const url = request.nextUrl.clone();
-      url.pathname = isAdmin ? '/' : '/tienda';
+      url.pathname = isAdmin ? '/admin' : '/';
       return NextResponse.redirect(url);
     }
 
-    // B) Regla estricta: Si es ADMIN o SUPER_ADMIN e intenta acceder a la Tienda de Compradores (/tienda, /mis-boletos)
-    if (isAdmin && isCustomerRoute) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/';
-      return NextResponse.redirect(url);
-    }
-
-    // C) Regla estricta: Si es CLIENTE e intenta acceder a las rutas de Administración (/, /rifas, /ventas, /loterias, /auditoria)
-    const isAdminRoute =
-      pathname === '/' ||
-      pathname.startsWith('/rifas') ||
-      pathname.startsWith('/ventas') ||
-      pathname.startsWith('/loterias') ||
-      pathname.startsWith('/auditoria');
-
+    // B) Si es un cliente estándar e intenta acceder a rutas de administración protegidas
     if (!isAdmin && isAdminRoute) {
       const url = request.nextUrl.clone();
-      url.pathname = '/tienda';
+      url.pathname = '/';
       return NextResponse.redirect(url);
     }
   }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useToast } from '@/context/ToastContext';
 
 interface OrderSale {
   id: string;
@@ -27,6 +28,7 @@ export default function VentasPage() {
   const [selectedProof, setSelectedProof] = useState<{ url: string; order: string; customer: string } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast();
   const supabase = createClient();
 
   // Cargar ventas reales desde Supabase
@@ -170,11 +172,11 @@ export default function VentasPage() {
         throw new Error(json.error || 'No se pudo aprobar la orden.');
       }
 
-      alert(`✅ ${json.message}`);
+      toastSuccess('¡Pago Aprobado con Éxito!', json.message || 'Boletos despachados al correo del comprador.');
       await loadSalesData();
     } catch (err: any) {
       console.error('Error aprobando orden:', err);
-      alert(`Error: ${err.message}`);
+      toastError('Error al Aprobar Orden', err.message);
     } finally {
       setActionLoadingId(null);
     }
@@ -182,10 +184,6 @@ export default function VentasPage() {
 
   // RECHAZAR PAGO Y LIBERAR BOLETOS
   const handleRejectOrder = async (orderId: string) => {
-    if (!window.confirm('¿Seguro que deseas rechazar este comprobante y liberar los boletos?')) {
-      return;
-    }
-
     try {
       setActionLoadingId(orderId);
       const res = await fetch(`/api/orders/${orderId}/reject`, {
@@ -196,11 +194,11 @@ export default function VentasPage() {
         throw new Error(json.error || 'No se pudo rechazar la orden.');
       }
 
-      alert('❌ Orden rechazada y boletos liberados.');
+      toastWarning('Orden Rechazada', 'Los boletos han sido liberados nuevamente al público.');
       await loadSalesData();
     } catch (err: any) {
       console.error('Error rechazando orden:', err);
-      alert(`Error: ${err.message}`);
+      toastError('Error al Rechazar Orden', err.message);
     } finally {
       setActionLoadingId(null);
     }

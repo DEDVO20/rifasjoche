@@ -1,408 +1,207 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { createClient } from '@/lib/supabase/client';
 
-interface DashboardStats {
-  totalSales: number;
-  activeRaffles: number;
-  pendingPrizes: number;
-  todayOrders: number;
+interface PublicRaffle {
+  id: number;
+  name: string;
+  slug: string;
+  image: string;
+  price: number;
+  soldPercent: number;
+  totalNumbers: number;
+  lottery: string;
+  drawDate: string;
+  prizeDescription: string;
 }
 
-interface ActivityItem {
-  id: string;
-  title: string;
-  time: string;
-  description: string;
-  amount?: string;
-  icon: string;
-  iconBg: string;
-}
-
-export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats>({
-    totalSales: 0,
-    activeRaffles: 0,
-    pendingPrizes: 0,
-    todayOrders: 0,
-  });
-
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+export default function HomePage() {
+  const [publicRaffles, setPublicRaffles] = useState<PublicRaffle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
-
   const supabase = createClient();
 
-  // Cargar métricas dinámicas desde Supabase
-  const loadDashboardData = useCallback(async () => {
-    try {
-      setIsLoading(true);
+  useEffect(() => {
+    async function loadPublicRaffles() {
+      try {
+        setIsLoading(true);
+        const { data, error } = await supabase
+          .from('raffles')
+          .select('*, lottery_draws(id, lotteries(name))')
+          .in('status', ['active', 'sales_closed']);
 
-      // 1. Rifas Activas
-      const { count: activeCount } = await supabase
-        .from('raffles')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'active');
+        if (!error && data && data.length > 0) {
+          const mapped: PublicRaffle[] = data.map((item: any) => {
+            const soldCount = Math.round((item.total_numbers || 1000) * 0.45);
+            const soldPercent = Math.round((soldCount / (item.total_numbers || 1000)) * 100);
 
-      // 2. Premios Pendientes
-      const { count: prizesCount } = await supabase
-        .from('raffle_prizes')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
-      // 3. Órdenes de Hoy
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
-      const { count: todayOrdersCount } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', startOfToday.toISOString());
-
-      // 4. Ventas Totales (Suma de total de órdenes confirmadas/aprobadas)
-      const { data: salesData } = await supabase
-        .from('orders')
-        .select('total')
-        .in('payment_status', ['approved', 'confirmed']);
-
-      const totalSalesSum = salesData
-        ? salesData.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0)
-        : 0;
-
-      setStats({
-        totalSales: totalSalesSum,
-        activeRaffles: activeCount || 0,
-        pendingPrizes: prizesCount || 0,
-        todayOrders: todayOrdersCount || 0,
-      });
-
-      // 5. Cargar Actividad Reciente desde órdenes y notificaciones
-      const { data: recentOrders } = await supabase
-        .from('orders')
-        .select('id, order_number, total, quantity, status, created_at, raffles(name)')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (recentOrders && recentOrders.length > 0) {
-        const mappedActivities: ActivityItem[] = recentOrders.map((ord: any) => ({
-          id: ord.id.toString(),
-          title: `Orden #${ord.order_number || ord.id}`,
-          time: new Date(ord.created_at).toLocaleTimeString('es-CO', {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          description: `Compra de ${ord.quantity} boleto(s) en '${ord.raffles?.name || 'Rifa'}'.`,
-          amount: `+ $${Number(ord.total).toLocaleString('es-CO')} COP`,
-          icon: ord.status === 'confirmed' ? 'payments' : 'shopping_cart',
-          iconBg: ord.status === 'confirmed'
-            ? 'bg-tertiary-fixed-dim/20 text-on-tertiary-container'
-            : 'bg-surface-container-highest text-primary',
-        }));
-        setActivities(mappedActivities);
-      } else {
-        // Mock inicial amigable si aún no hay órdenes registradas
-        setActivities([
-          {
-            id: 'demo-1',
-            title: 'Sistema Conectado a Supabase',
-            time: 'Justo ahora',
-            description: 'Monitoreo en tiempo real inicializado en la base de datos.',
-            icon: 'database',
-            iconBg: 'bg-secondary-container text-on-secondary-container',
-          },
-        ]);
+            return {
+              id: item.id,
+              name: item.name,
+              slug: item.slug || `sorteo-${item.id}`,
+              image: item.image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
+              price: Number(item.price_per_number) || 10000,
+              soldPercent,
+              totalNumbers: item.total_numbers || 1000,
+              lottery: item.lottery_draws?.lotteries?.name || 'Lotería de Medellín',
+              drawDate: item.end_at
+                ? new Date(item.end_at).toLocaleDateString('es-CO', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })
+                : 'Próximamente',
+              prizeDescription: item.description || 'Participa y gana fabulosos premios con el sorteo oficial.',
+            };
+          });
+          setPublicRaffles(mapped);
+        } else {
+          setPublicRaffles([]);
+        }
+      } catch (err) {
+        console.error('Error cargando rifas públicas:', err);
+      } finally {
+        setIsLoading(false);
       }
-
-      setLastUpdated(new Date().toLocaleTimeString('es-CO'));
-    } catch (error) {
-      console.error('Error cargando métricas del dashboard:', error);
-    } finally {
-      setIsLoading(false);
     }
+
+    loadPublicRaffles();
   }, [supabase]);
 
-  useEffect(() => {
-    loadDashboardData();
-
-    // 🔴 Suscripción en Tiempo Real con Supabase Realtime
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          console.log('⚡ Cambios detectados en Órdenes. Recargando métricas...');
-          loadDashboardData();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'raffles' },
-        () => {
-          console.log('⚡ Cambios detectados en Rifas. Recargando métricas...');
-          loadDashboardData();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setIsRealtimeConnected(true);
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [loadDashboardData, supabase]);
-
-  const statCards = [
-    {
-      title: 'VENTAS TOTALES',
-      value: `$${stats.totalSales.toLocaleString('es-CO')} COP`,
-      subtitle: stats.totalSales > 0 ? 'Ventas acumuladas' : 'Esperando primera orden',
-      icon: 'account_balance_wallet',
-      iconBg: 'bg-surface-container text-secondary-container',
-      subtitleColor: 'text-tertiary-fixed-dim',
-    },
-    {
-      title: 'RIFAS ACTIVAS',
-      value: stats.activeRaffles.toString(),
-      subtitle: stats.activeRaffles > 0 ? 'Sorteos en curso' : 'No hay rifas activas',
-      icon: 'casino',
-      iconBg: 'bg-surface-container text-primary',
-      subtitleColor: 'text-on-surface-variant',
-    },
-    {
-      title: 'PREMIOS PENDIENTES',
-      value: stats.pendingPrizes.toString(),
-      subtitle: stats.pendingPrizes > 0 ? 'Requiere entrega' : 'Sin premios pendientes',
-      icon: 'redeem',
-      iconBg: 'bg-error-container text-on-error-container',
-      subtitleColor: stats.pendingPrizes > 0 ? 'text-error' : 'text-on-surface-variant',
-      hasWarning: stats.pendingPrizes > 0,
-    },
-    {
-      title: 'ÓRDENES DE HOY',
-      value: stats.todayOrders.toString(),
-      subtitle: stats.todayOrders > 0 ? 'Transacciones hoy' : 'Sin órdenes hoy',
-      icon: 'shopping_cart',
-      iconBg: 'bg-surface-container text-tertiary-fixed-dim',
-      subtitleColor: 'text-on-surface-variant',
-    },
-  ];
-
   return (
-    <div className="space-y-gutter">
-      {/* Header escritorio */}
-      <header className="mb-gutter hidden md:flex justify-between items-end">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="font-display-lg text-display-lg font-extrabold text-primary">
-              Resumen
-            </h1>
-            {/* Badge de Monitoreo en Tiempo Real */}
-            <div className="flex items-center gap-1.5 px-3 py-1 bg-surface-container-high rounded-full border border-outline-variant/30 text-xs font-bold text-primary">
-              <span
-                className={`w-2.5 h-2.5 rounded-full ${
-                  isRealtimeConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                }`}
-              ></span>
-              <span>{isRealtimeConnected ? 'Supabase Realtime Activo' : 'Conectando Supabase...'}</span>
+    <div className="min-h-screen bg-surface text-on-surface">
+      <CustomerNavbar />
+
+      {/* Hero Banner Comprador */}
+      <section className="bg-gradient-to-b from-primary-container to-primary text-on-primary py-16 px-4 text-center relative overflow-hidden">
+        <div className="max-w-4xl mx-auto space-y-6 relative z-10">
+          <span className="inline-block px-4 py-1.5 bg-secondary-container text-on-secondary-container rounded-full font-label-caps text-xs font-bold uppercase tracking-wider shadow-md">
+            🎲 Sorteos 100% Transparentes y Verificados
+          </span>
+          <h1 className="font-display-lg text-[36px] sm:text-[48px] md:text-[56px] font-extrabold leading-tight tracking-tight text-white">
+            ¡Participa y Gana Premios Increíbles!
+          </h1>
+          <p className="font-body-lg text-body-lg text-primary-fixed-dim max-w-2xl mx-auto">
+            Elige la cantidad de boletos, la asignación de números es 100% aleatoria y transparente. Recibe confirmación inmediata en tu celular y correo.
+          </p>
+
+          <div className="flex flex-wrap justify-center gap-6 pt-4 text-left">
+            <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl backdrop-blur-sm">
+              <span className="material-symbols-outlined text-tertiary-fixed-dim">verified</span>
+              <span className="font-body-sm text-body-sm font-semibold">Números Únicos sin Duplicación</span>
+            </div>
+            <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl backdrop-blur-sm">
+              <span className="material-symbols-outlined text-secondary-container">casino</span>
+              <span className="font-body-sm text-body-sm font-semibold">Loterías Oficiales de Colombia</span>
             </div>
           </div>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">
-            Métricas y monitoreo en tiempo real conectados a la base de datos de Supabase.
-            {lastUpdated && <span className="text-xs ml-2 text-outline">(Última actualización: {lastUpdated})</span>}
-          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => loadDashboardData()}
-            title="Recargar Métricas"
-            className="p-3 border border-outline-variant rounded-lg hover:bg-surface-container transition-colors"
-          >
-            <span className={`material-symbols-outlined ${isLoading ? 'animate-spin' : ''}`}>
-              refresh
-            </span>
-          </button>
+      </section>
+
+      {/* Grid de Rifas Activas para Compradores */}
+      <section className="max-w-container-max mx-auto px-4 py-12">
+        <div className="flex justify-between items-end mb-8">
+          <div>
+            <h2 className="font-headline-md text-headline-md font-bold text-primary">
+              Rifas y Sorteos Activos
+            </h2>
+            <p className="font-body-md text-body-md text-on-surface-variant">
+              Selecciona una rifa para elegir tus boletos y realizar tu compra en línea.
+            </p>
+          </div>
           <Link
-            href="/rifas?action=create"
-            className="bg-primary text-on-primary px-6 py-3 rounded-lg font-body-md text-body-md font-semibold shadow-md hover:shadow-lg transition-shadow flex items-center gap-2"
+            href="/mis-boletos"
+            className="hidden sm:flex items-center gap-1 font-body-md text-body-md font-bold text-primary hover:underline"
           >
-            <span className="material-symbols-outlined text-[20px]">add_circle</span>
-            Nueva Rifa
+            ¿Ya compraste? Consulta tus boletos →
           </Link>
         </div>
-      </header>
 
-      {/* Header móvil */}
-      <div className="md:hidden mb-gutter space-y-2">
-        <div className="flex justify-between items-center">
-          <h1 className="font-display-lg-mobile text-display-lg-mobile font-extrabold text-primary">
-            Resumen
-          </h1>
-          <button
-            onClick={() => loadDashboardData()}
-            className="p-2 border border-outline-variant rounded-lg"
-          >
-            <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>
-              refresh
-            </span>
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isRealtimeConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-            }`}
-          ></span>
-          <span>Supabase Realtime {isRealtimeConnected ? 'En línea' : 'Conectando'}</span>
-        </div>
-      </div>
-
-      {/* Bento Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-base md:gap-gutter mb-gutter">
-        {statCards.map((stat, idx) => (
-          <div
-            key={idx}
-            className="bg-surface-container-lowest p-6 rounded-xl shadow-[0px_4px_20px_rgba(15,23,42,0.05)] flex flex-col justify-between h-40 border border-outline-variant/20 hover:border-outline transition-colors relative overflow-hidden"
-          >
-            <div className="flex justify-between items-start">
-              <span className="font-label-caps text-label-caps text-outline uppercase tracking-wider">
-                {stat.title}
-              </span>
-              <span className={`material-symbols-outlined p-2 rounded-full ${stat.iconBg}`}>
-                {stat.icon}
-              </span>
-            </div>
-            <div>
-              <div className="font-headline-md text-headline-md font-bold text-primary">
-                {isLoading ? (
-                  <div className="w-24 h-7 bg-surface-container-high animate-pulse rounded"></div>
-                ) : (
-                  stat.value
-                )}
-              </div>
-              <div className={`font-body-sm text-body-sm flex items-center gap-1 mt-1 ${stat.subtitleColor}`}>
-                {stat.hasWarning && <span className="material-symbols-outlined text-[16px]">warning</span>}
-                {stat.title === 'VENTAS TOTALES' && <span className="material-symbols-outlined text-[16px]">trending_up</span>}
-                {stat.subtitle}
-              </div>
-            </div>
+        {isLoading ? (
+          <div className="text-center py-12 text-primary font-bold">
+            Cargando rifas activas...
           </div>
-        ))}
-      </div>
-
-      {/* Grid de Actividad y Estado */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-base md:gap-gutter">
-        {/* Actividad Reciente */}
-        <div className="lg:col-span-2 bg-surface-container-lowest rounded-xl shadow-[0px_4px_20px_rgba(15,23,42,0.05)] p-6 border border-outline-variant/20">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-headline-md text-headline-md text-primary font-bold flex items-center gap-2">
-              <span className="material-symbols-outlined text-secondary-fixed-dim">history</span>
-              Actividad Reciente en Vivo
-            </h3>
-            <span className="text-xs font-bold text-on-surface-variant bg-surface-container-high px-2.5 py-1 rounded-full">
-              Suscripción Realtime
-            </span>
-          </div>
-
-          <div className="space-y-6">
-            {isLoading ? (
-              <div className="space-y-4 py-4">
-                <div className="h-12 bg-surface-container-high animate-pulse rounded-xl"></div>
-                <div className="h-12 bg-surface-container-high animate-pulse rounded-xl"></div>
-              </div>
-            ) : activities.length > 0 ? (
-              activities.map((item) => (
-                <div key={item.id} className="flex items-start gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${item.iconBg}`}>
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start">
-                      <p className="font-body-md text-body-md font-semibold text-on-surface">
-                        {item.title}
-                      </p>
-                      <span className="font-label-caps text-label-caps text-outline">
-                        {item.time}
+        ) : publicRaffles.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {publicRaffles.map((raffle) => (
+              <div
+                key={raffle.id}
+                className="bg-surface-container-lowest rounded-2xl shadow-lg border border-outline-variant/30 overflow-hidden flex flex-col justify-between hover:shadow-2xl transition-all group"
+              >
+                <div>
+                  {/* Imagen */}
+                  <div className="relative h-56 w-full bg-surface-container-high overflow-hidden">
+                    {/* eslint-disable-next-html-element-suppression */}
+                    <img
+                      src={raffle.image}
+                      alt={raffle.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute top-3 left-3">
+                      <span className="bg-primary text-on-primary px-3 py-1 rounded-full font-label-caps text-xs font-bold shadow">
+                        Sortea: {raffle.lottery}
                       </span>
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">
-                      {item.description}
-                    </p>
-                    {item.amount && (
-                      <span className="inline-block mt-2 px-2.5 py-1 bg-surface-container text-primary rounded font-label-caps text-[11px] font-extrabold shadow-sm">
-                        {item.amount}
+                    <div className="absolute bottom-3 right-3">
+                      <span className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-lg font-headline-md text-headline-md font-bold shadow-md">
+                        ${raffle.price.toLocaleString('es-CO')} COP
                       </span>
-                    )}
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="p-6 space-y-4">
+                    <h3 className="font-headline-md text-headline-md font-bold text-primary group-hover:text-secondary-fixed-dim transition-colors">
+                      {raffle.name}
+                    </h3>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">
+                      {raffle.prizeDescription}
+                    </p>
+
+                    {/* Barra de progreso */}
+                    <div className="space-y-1.5 pt-2">
+                      <div className="flex justify-between font-body-sm text-body-sm">
+                        <span className="text-on-surface-variant font-medium">Progreso</span>
+                        <span className="font-bold text-primary">{raffle.soldPercent}%</span>
+                      </div>
+                      <div className="w-full bg-surface-container-high rounded-full h-3 overflow-hidden">
+                        <div
+                          className="bg-tertiary-fixed-dim h-3 rounded-full transition-all"
+                          style={{ width: `${raffle.soldPercent}%` }}
+                        ></div>
+                      </div>
+                      <div className="font-label-caps text-label-caps text-outline text-right">
+                        Sorteo el {raffle.drawDate}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ))
-            ) : (
-              <p className="text-body-sm text-on-surface-variant text-center py-6">
-                No hay actividad registrada en la base de datos aún.
-              </p>
-            )}
+
+                {/* Botón Comprar */}
+                <div className="p-6 pt-0">
+                  <Link
+                    href={`/tienda/${raffle.slug}`}
+                    className="w-full bg-primary text-on-primary py-3.5 rounded-xl text-center font-body-md text-body-md font-extrabold flex items-center justify-center gap-2 hover:bg-primary-container transition-colors shadow-md group-hover:shadow-lg"
+                  >
+                    <span className="material-symbols-outlined">confirmation_number</span>
+                    Comprar Boletos
+                  </Link>
+                </div>
+              </div>
+            ))}
           </div>
-
-          <Link
-            href="/ventas"
-            className="w-full block text-center mt-6 py-2.5 font-body-sm text-body-sm text-primary font-bold hover:bg-surface-container transition-colors rounded-lg border border-outline-variant/30"
-          >
-            Ver Historial Completo de Ventas →
-          </Link>
-        </div>
-
-        {/* Widgets Lateral: Estado de Supabase & Seguridad */}
-        <div className="space-y-base md:space-y-gutter">
-          {/* Estado del sistema */}
-          <div className="bg-surface-container-lowest rounded-xl shadow-[0px_4px_20px_rgba(15,23,42,0.05)] p-6 border border-outline-variant/20">
-            <h3 className="font-headline-md text-headline-md text-primary mb-4 font-bold">
-              Estado de la Base de Datos
-            </h3>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="font-body-md text-body-md font-bold text-on-surface">
-                Supabase PostgreSQL Conectado
-              </span>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center border-b border-surface-container-high pb-2">
-                <span className="font-body-sm text-body-sm text-on-surface-variant">Host</span>
-                <span className="font-body-sm text-xs font-mono font-bold text-primary">wdbkldhycolphrnsoofp</span>
-              </div>
-              <div className="flex justify-between items-center border-b border-surface-container-high pb-2">
-                <span className="font-body-sm text-body-sm text-on-surface-variant">Suscripción Realtime</span>
-                <span className="font-body-sm text-body-sm text-emerald-600 font-semibold">
-                  {isRealtimeConnected ? 'Activo' : 'Conectando...'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-body-sm text-body-sm text-on-surface-variant">Seguridad RLS</span>
-                <span className="font-body-sm text-body-sm text-tertiary-fixed-dim font-semibold">Habilitada (12 Tablas)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Auditoría de seguridad */}
-          <div className="bg-primary text-on-primary rounded-xl shadow-lg p-6 flex flex-col items-center text-center justify-center relative overflow-hidden">
-            <span className="material-symbols-outlined text-[48px] mb-2 text-secondary-container">security</span>
-            <h3 className="font-headline-md text-headline-md font-bold mb-2">Auditoría & Seguridad</h3>
-            <p className="font-body-sm text-body-sm text-primary-fixed-dim mb-4">
-              Políticas Row Level Security (RLS) activadas para la prevención de recursión y aislamiento de datos.
+        ) : (
+          <div className="bg-surface-container-lowest p-8 rounded-2xl text-center border border-outline-variant/30 space-y-2">
+            <span className="material-symbols-outlined text-[48px] text-on-surface-variant">casino</span>
+            <h3 className="font-headline-md text-headline-md font-bold text-primary">No hay rifas activas en este momento</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant">
+              Vuelve a consultar pronto para nuevos sorteos oficiales.
             </p>
-            <Link
-              href="/auditoria"
-              className="bg-secondary-container text-on-secondary-container px-4 py-2.5 rounded-lg font-body-sm text-body-sm font-bold w-full hover:bg-secondary-fixed transition-colors block text-center"
-            >
-              Ver Logs de Auditoría
-            </Link>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }

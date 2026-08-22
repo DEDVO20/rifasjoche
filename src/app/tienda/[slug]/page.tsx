@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 import { createClient } from '@/lib/supabase/client';
 
 interface PublicPrize {
@@ -156,6 +157,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
   const handleCopyKey = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(true);
+    toastSuccess('¡Llave Copiada!', `${text} copiado al portapapeles.`);
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
@@ -164,6 +166,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       const file = e.target.files[0];
       setProofFile(file);
       setProofPreview(URL.createObjectURL(file));
+      toastInfo('Comprobante Seleccionado', `${file.name} listo para subir.`);
     }
   };
 
@@ -238,9 +241,10 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       setConfirmedOrderNumber(data.orderNumber);
       setAssignedNumbers(data.assignedNumbers);
       setIsPaymentSuccess(true);
+      toastSuccess('¡Orden Registrada!', `Comprobante de orden #${data.orderNumber} enviado a verificación.`);
     } catch (err: any) {
       console.error('Error procesando la compra:', err);
-      alert(`Error al registrar la compra: ${err.message}`);
+      toastError('Error al Procesar Compra', err.message);
     } finally {
       setIsSubmitting(false);
     }

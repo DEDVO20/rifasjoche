@@ -1,8 +1,5 @@
 import { Resend } from 'resend';
 
-const resendApiKey = process.env.RESEND_API_KEY || 're_5SdC43cE_9turTZezf78xKybv2KL9arZj';
-const resend = new Resend(resendApiKey);
-
 interface TicketEmailParams {
   to: string;
   customerName: string;
@@ -25,6 +22,14 @@ export async function sendTicketConfirmationEmail({
   totalAmount,
 }: TicketEmailParams) {
   try {
+    const apiKey = process.env.RESEND_API_KEY?.trim() || '';
+    if (!apiKey) {
+      console.warn('⚠️ RESEND_API_KEY no está configurada en el archivo .env');
+      return { success: false, error: 'RESEND_API_KEY no configurada' };
+    }
+
+    const resend = new Resend(apiKey);
+
     const formattedNumbersHtml = ticketNumbers
       .map(
         (num) =>
@@ -116,7 +121,6 @@ export async function sendTicketConfirmationEmail({
       </html>
     `;
 
-    // Intentar enviar con Resend
     const response = await resend.emails.send({
       from: 'Rifas Oficiales <onboarding@resend.dev>',
       to: [to],
