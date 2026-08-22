@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { createClient } from '@/lib/supabase/client';
@@ -11,6 +11,7 @@ interface PublicRaffle {
   slug: string;
   image: string;
   price: number;
+  soldCount: number;
   soldPercent: number;
   totalNumbers: number;
   lottery: string;
@@ -23,52 +24,69 @@ export default function TiendaPublicaPage() {
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
 
-  useEffect(() => {
-    async function loadPublicRaffles() {
-      try {
-        setIsLoading(true);
-        const { data, error } = await supabase
-          .from('raffles')
-          .select('*, lottery_draws(id, lotteries(name))')
-          .in('status', ['active', 'sales_closed']);
+  const loadPublicRaffles = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('raffles')
+        .select('*, lottery_draws(id, lotteries(name))')
+        .in('status', ['active', 'sales_closed'])
+        .order('id', { ascending: false });
 
-        if (!error && data && data.length > 0) {
-          const mapped: PublicRaffle[] = data.map((item: any) => {
-            const soldCount = Math.round((item.total_numbers || 1000) * 0.45);
-            const soldPercent = Math.round((soldCount / (item.total_numbers || 1000)) * 100);
+      if (!error && data && data.length > 0) {
+        const raffleIds = data.map((r: any) => r.id);
 
-            return {
-              id: item.id,
-              name: item.name,
-              slug: item.slug || `sorteo-${item.id}`,
-              image: item.image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
-              price: Number(item.price_per_number) || 10000,
-              soldPercent,
-              totalNumbers: item.total_numbers || 1000,
-              lottery: item.lottery_draws?.lotteries?.name || 'Lotería de Medellín',
-              drawDate: item.end_at
-                ? new Date(item.end_at).toLocaleDateString('es-CO', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })
-                : 'Próximamente',
-              prizeDescription: item.description || 'Participa y gana fabulosos premios con el sorteo oficial.',
-            };
-          });
-          setPublicRaffles(mapped);
-        } else {
-          setPublicRaffles([]);
-        }
-      } catch (err) {
-        console.error('Error cargando rifas públicas:', err);
-      } finally {
-        setIsLoading(false);
+        // Conteo real de boletos vendidos en public.raffle_numbers
+        const { data: soldNumbers } = await supabase
+          .from('raffle_numbers')
+          .select('raffle_id')
+          .in('raffle_id', raffleIds)
+          .eq('status', 'sold');
+
+        const soldCountMap = new Map<number, number>();
+        (soldNumbers || []).forEach((item: any) => {
+          soldCountMap.set(item.raffle_id, (soldCountMap.get(item.raffle_id) || 0) + 1);
+        });
+
+        const mapped: PublicRaffle[] = data.map((item: any) => {
+          const realSoldCount = soldCountMap.get(item.id) || 0;
+          const totalNums = item.total_numbers || 10000;
+          const soldPercent = Math.min(100, Math.round((realSoldCount / totalNums) * 100));
+
+          return {
+            id: item.id,
+            name: item.name,
+            slug: item.slug || `sorteo-${item.id}`,
+            image: item.image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
+            price: Number(item.price_per_number) || 10000,
+            soldCount: realSoldCount,
+            soldPercent,
+            totalNumbers: totalNums,
+            lottery: item.lottery_draws?.lotteries?.name || 'Lotería Oficial',
+            drawDate: item.end_at
+              ? new Date(item.end_at).toLocaleDateString('es-CO', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })
+              : 'Próximamente',
+            prizeDescription: item.description || 'Participa y gana fabulosos premios con el sorteo oficial.',
+          };
+        });
+        setPublicRaffles(mapped);
+      } else {
+        setPublicRaffles([]);
       }
+    } catch (err) {
+      console.error('Error cargando rifas públicas:', err);
+    } finally {
+      setIsLoading(false);
     }
-
-    loadPublicRaffles();
   }, [supabase]);
+
+  useEffect(() => {
+    loadPublicRaffles();
+  }, [loadPublicRaffles]);
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
@@ -84,7 +102,7 @@ export default function TiendaPublicaPage() {
             ¡Participa y Gana Premios Increíbles!
           </h1>
           <p className="font-body-lg text-body-lg text-primary-fixed-dim max-w-2xl mx-auto">
-            Elige la cantidad de boletos, la asignación de números es 100% aleatoria y transparente. Recibe confirmación inmediata en tu celular.
+            Elige la cantidad de boletos, la asignación de números es 100% aleatoria y transparente. Recibe confirmación inmediata en tu celular y correo.
           </p>
 
           <div className="flex flex-wrap justify-center gap-6 pt-4 text-left">
@@ -105,7 +123,7 @@ export default function TiendaPublicaPage() {
         <div className="flex justify-between items-end mb-8">
           <div>
             <h2 className="font-headline-md text-headline-md font-bold text-primary">
-              Rifas Disponibles en Supabase
+              Rifas Disponibles
             </h2>
             <p className="font-body-md text-body-md text-on-surface-variant">
               Selecciona una rifa para elegir la cantidad de boletos y realizar tu compra en línea.
@@ -121,7 +139,7 @@ export default function TiendaPublicaPage() {
 
         {isLoading ? (
           <div className="text-center py-12 text-primary font-bold">
-            Cargando rifas activas desde Supabase...
+            Cargando rifas y conteo real de ventas...
           </div>
         ) : publicRaffles.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -140,7 +158,7 @@ export default function TiendaPublicaPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                     <div className="absolute top-3 left-3">
-                      <span className="bg-primary text-on-primary px-3 py-1 rounded-full font-label-caps text-xs font-bold">
+                      <span className="bg-primary text-on-primary px-3 py-1 rounded-full font-label-caps text-xs font-bold shadow">
                         Sortea: {raffle.lottery}
                       </span>
                     </div>
@@ -156,20 +174,22 @@ export default function TiendaPublicaPage() {
                     <h3 className="font-headline-md text-headline-md font-bold text-primary group-hover:text-secondary-fixed-dim transition-colors">
                       {raffle.name}
                     </h3>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">
+                    <p className="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">
                       {raffle.prizeDescription}
                     </p>
 
                     {/* Barra de progreso */}
                     <div className="space-y-1.5 pt-2">
-                      <div className="flex justify-between font-body-sm text-body-sm">
-                        <span className="text-on-surface-variant font-medium">Progreso</span>
+                      <div className="flex justify-between font-body-sm text-xs">
+                        <span className="text-on-surface-variant font-semibold">
+                          {raffle.soldCount} de {raffle.totalNumbers} boletos vendidos
+                        </span>
                         <span className="font-bold text-primary">{raffle.soldPercent}%</span>
                       </div>
                       <div className="w-full bg-surface-container-high rounded-full h-3 overflow-hidden">
                         <div
-                          className="bg-tertiary-fixed-dim h-3 rounded-full transition-all"
-                          style={{ width: `${raffle.soldPercent}%` }}
+                          className="bg-emerald-500 h-3 rounded-full transition-all duration-500"
+                          style={{ width: `${Math.max(1, raffle.soldPercent)}%` }}
                         ></div>
                       </div>
                       <div className="font-label-caps text-label-caps text-outline text-right">

@@ -76,13 +76,27 @@ export default function GestorRifasPage() {
         .order('id', { ascending: false });
 
       if (!error && rafflesData && rafflesData.length > 0) {
+        const raffleIds = rafflesData.map((r: any) => r.id);
+
+        // Consultar boletos vendidos reales de cada rifa
+        const { data: soldNumbers } = await supabase
+          .from('raffle_numbers')
+          .select('raffle_id')
+          .in('raffle_id', raffleIds)
+          .eq('status', 'sold');
+
+        const soldMap = new Map<number, number>();
+        (soldNumbers || []).forEach((item: any) => {
+          soldMap.set(item.raffle_id, (soldMap.get(item.raffle_id) || 0) + 1);
+        });
+
         const formatted: RaffleItem[] = rafflesData.map((r: any) => ({
           id: r.id,
           name: r.name,
           slug: r.slug || `rifa-${r.id}`,
           image_url: r.image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
           price: Number(r.price_per_number) || 10000,
-          sold: 0,
+          sold: soldMap.get(r.id) || 0,
           total: r.total_numbers || 10000,
           status: r.status || 'active',
           endDate: r.end_at ? r.end_at.split('T')[0] : '2026-12-31',
