@@ -4,6 +4,7 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { createClient } from '@/lib/supabase/client';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 
 function LoginForm() {
@@ -16,7 +17,6 @@ function LoginForm() {
   const { login } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') || '/tienda';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +38,30 @@ function LoginForm() {
         setErrorMsg(error.message || 'Ocurrió un error al iniciar sesión.');
       }
     } else {
-      router.push(redirectTo);
+      const redirectParam = searchParams.get('redirect');
+      if (redirectParam) {
+        router.push(redirectParam);
+      } else {
+        try {
+          const supabase = createClient();
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: userProfile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', session.user.id)
+              .single();
+
+            if (userProfile?.role === 'admin' || userProfile?.role === 'super_admin') {
+              router.push('/admin');
+              return;
+            }
+          }
+        } catch {
+          // fallback si falla consulta
+        }
+        router.push('/tienda');
+      }
     }
   };
 
