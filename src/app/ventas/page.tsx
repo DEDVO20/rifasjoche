@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/context/ToastContext';
 
@@ -19,6 +19,17 @@ interface OrderSale {
   date: string;
 }
 
+type OrderRow = {
+  id: number;
+  order_number: string;
+  user_id: string | null;
+  raffle_id: number | null;
+  total: number | string | null;
+  status: string | null;
+  payment_status: string | null;
+  created_at: string;
+};
+
 export default function VentasPage() {
   const [sales, setSales] = useState<OrderSale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,64 +38,92 @@ export default function VentasPage() {
   const [isRealtime, setIsRealtime] = useState(false);
   const [selectedProof, setSelectedProof] = useState<{ url: string; order: string; customer: string } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const { success: toastSuccess, error: toastError, warning: toastWarning, info: toastInfo } = useToast();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Cargar ventas reales desde Supabase
   const loadSalesData = useCallback(async () => {
     try {
       setIsLoading(true);
+      setLoadError(null);
+
       const { data, error } = await supabase
         .from('orders')
-        .select(`
-          id,
-          order_number,
-          total,
-          status,
-          payment_status,
-          created_at,
-          profiles (
-            full_name,
-            email,
-            phone
-          ),
-          raffles (
-            name
-          ),
-          payments (
-            provider,
-            metadata,
-            status
-          ),
-          raffle_numbers (
-            number
-          )
-        `)
+        .select('id, order_number, user_id, raffle_id, total, status, payment_status, created_at')
         .order('id', { ascending: false });
 
       if (error) {
         console.error('Error cargando órdenes de Supabase:', error);
+        setLoadError(error.message || 'No se pudieron cargar las ventas desde Supabase.');
+        setSales([]);
         return;
       }
 
       if (data && data.length > 0) {
-        const formattedSales: OrderSale[] = data.map((order: any) => {
-          const rawNumbers = (order.raffle_numbers || []).map((n: any) => n.number);
+        const orders = data as OrderRow[];
+        const userIds = Array.from(new Set(orders.map((order) => order.user_id).filter(Boolean))) as string[];
+        const raffleIds = Array.from(new Set(orders.map((order) => order.raffle_id).filter(Boolean))) as number[];
+        const orderIds = orders.map((order) => order.id);
+
+        const [profilesResult, rafflesResult, paymentsResult, numbersResult] = await Promise.all([
+          userIds.length
+            ? supabase.from('profiles').select('id, full_name, email, phone').in('id', userIds)
+            : Promise.resolve({ data: [], error: null }),
+          raffleIds.length
+            ? supabase.from('raffles').select('id, name').in('id', raffleIds)
+            : Promise.resolve({ data: [], error: null }),
+          supabase.from('payments').select('order_id, provider, metadata, status').in('order_id', orderIds),
+          supabase.from('raffle_numbers').select('order_id, number').in('order_id', orderIds).order('number', { ascending: true }),
+        ]);
+
+        const relatedErrors = [
+          profilesResult.error,
+          rafflesResult.error,
+          paymentsResult.error,
+          numbersResult.error,
+        ].filter(Boolean);
+
+        if (relatedErrors.length > 0) {
+          console.warn('Algunos datos relacionados de ventas no cargaron:', relatedErrors);
+        }
+
+        const profilesById = new Map((profilesResult.data || []).map((profile: any) => [profile.id, profile]));
+        const rafflesById = new Map((rafflesResult.data || []).map((raffle: any) => [raffle.id, raffle]));
+        const paymentsByOrderId = new Map<number, any>();
+        (paymentsResult.data || []).forEach((payment: any) => {
+          if (!paymentsByOrderId.has(payment.order_id)) {
+            paymentsByOrderId.set(payment.order_id, payment);
+          }
+        });
+
+        const numbersByOrderId = new Map<number, string[]>();
+        (numbersResult.data || []).forEach((row: any) => {
+          const current = numbersByOrderId.get(row.order_id) || [];
+          current.push(row.number);
+          numbersByOrderId.set(row.order_id, current);
+        });
+
+        const formattedSales: OrderSale[] = orders.map((order) => {
+          const rawNumbers = numbersByOrderId.get(order.id) || [];
+          const profile = order.user_id ? profilesById.get(order.user_id) : null;
+          const raffle = order.raffle_id ? rafflesById.get(order.raffle_id) : null;
+          const payment = paymentsByOrderId.get(order.id);
 
           // Extraer datos del perfil o de la metadata del pago (para compras de invitados)
-          const payMeta = order.payments?.[0]?.metadata;
+          const payMeta = payment?.metadata || {};
           const customerName =
             payMeta?.customer_name ||
-            (order.profiles as any)?.full_name ||
+            profile?.full_name ||
             'Comprador';
           const customerPhone =
             payMeta?.customer_phone ||
-            (order.profiles as any)?.phone ||
+            profile?.phone ||
             'Sin teléfono';
           const customerEmail =
             payMeta?.customer_email ||
-            (order.profiles as any)?.email ||
+            profile?.email ||
             'Sin correo';
 
           const proofUrl =
@@ -96,7 +135,7 @@ export default function VentasPage() {
               ? 'PSE'
               : payMeta?.payment_key
               ? `Transferencia (Llave ${payMeta.payment_key})`
-              : order.payments?.[0]?.provider || 'Transferencia';
+              : payment?.provider || 'Transferencia';
 
           let computedStatus: 'approved' | 'pending' | 'rejected' = 'pending';
           if (order.status === 'confirmed' || order.payment_status === 'approved') {
@@ -118,7 +157,7 @@ export default function VentasPage() {
             customerName,
             customerPhone,
             customerEmail,
-            raffleName: (order.raffles as any)?.name || 'Sorteo',
+            raffleName: raffle?.name || 'Sorteo',
             numbers: rawNumbers,
             total: Number(order.total) || 0,
             paymentMethod,
@@ -134,6 +173,7 @@ export default function VentasPage() {
       }
     } catch (err) {
       console.error('Excepción cargando ventas:', err);
+      setLoadError(err instanceof Error ? err.message : 'Ocurrio un error inesperado cargando ventas.');
     } finally {
       setIsLoading(false);
     }
@@ -259,6 +299,13 @@ export default function VentasPage() {
           Actualizar
         </button>
       </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <div className="font-bold">No se pudieron cargar las ventas</div>
+          <div className="mt-0.5">{loadError}</div>
+        </div>
+      )}
 
       {/* Tarjetas de Métricas de Ventas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
