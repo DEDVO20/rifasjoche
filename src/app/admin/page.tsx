@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
@@ -34,7 +34,7 @@ export default function AdminDashboardPage() {
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Cargar métricas dinámicas desde Supabase
   const loadDashboardData = useCallback(async () => {
@@ -65,11 +65,12 @@ export default function AdminDashboardPage() {
       // 4. Ventas Totales (Suma de total de órdenes confirmadas/aprobadas)
       const { data: salesData } = await supabase
         .from('orders')
-        .select('total')
-        .in('payment_status', ['approved', 'confirmed']);
+        .select('total, status, payment_status');
 
       const totalSalesSum = salesData
-        ? salesData.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0)
+        ? salesData
+            .filter((curr) => curr.payment_status === 'approved' || curr.status === 'confirmed')
+            .reduce((acc, curr) => acc + (Number(curr.total) || 0), 0)
         : 0;
 
       setStats({

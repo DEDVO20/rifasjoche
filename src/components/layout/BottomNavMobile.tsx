@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 export default function BottomNavMobile() {
   const pathname = usePathname();
+  const { logout } = useAuth();
 
   const items = [
     { href: '/admin', label: 'Dashboard', icon: 'dashboard' },
@@ -36,6 +38,15 @@ export default function BottomNavMobile() {
           </Link>
         );
       })}
+      <button
+        type="button"
+        onClick={() => logout()}
+        className="flex flex-col items-center justify-center rounded-xl px-3 py-1 text-error hover:bg-error-container/20 active:scale-95 transition-transform"
+        title="Cerrar sesión"
+      >
+        <span className="material-symbols-outlined">logout</span>
+        <span className="font-body-sm text-[12px]">Salir</span>
+      </button>
     </nav>
   );
 }
