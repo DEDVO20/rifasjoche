@@ -349,6 +349,10 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
   // Manejar Pausar / Reanudar Ventas
   const handleTogglePause = async () => {
     if (!raffle) return;
+    if (raffle.winningNumber || raffle.status === 'completed') {
+      alert('Esta rifa ya cuenta con un número ganador oficial y está finalizada. No se pueden modificar sus ventas.');
+      return;
+    }
     const newStatus = raffle.status === 'paused' ? 'active' : 'paused';
     try {
       await supabase.from('raffles').update({ status: newStatus }).eq('id', raffle.id);
@@ -363,6 +367,10 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
   // Manejar Cancelar Rifa
   const handleCancelRaffle = async () => {
     if (!raffle) return;
+    if (raffle.winningNumber || raffle.status === 'completed') {
+      alert('Esta rifa ya cuenta con un número ganador oficial y está finalizada. No se puede cancelar.');
+      return;
+    }
     if (!window.confirm('¿Estás seguro de que deseas cancelar esta rifa?')) {
       return;
     }
@@ -545,19 +553,30 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         </div>
 
         <div className="flex flex-wrap gap-3 w-full md:w-auto">
-          <button
-            onClick={handleTogglePause}
-            className="flex-1 md:flex-none px-4 py-2 border-2 border-primary text-primary font-body-md text-body-md font-semibold rounded-lg hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1.5"
-          >
-            <span className="material-symbols-outlined text-[18px]">
-              {raffle.status === 'paused' ? 'play_arrow' : 'pause'}
-            </span>
-            {raffle.status === 'paused' ? 'Reanudar Ventas' : 'Pausar Ventas'}
-          </button>
+          {raffle.winningNumber || raffle.status === 'completed' ? (
+            <button
+              disabled
+              className="flex-1 md:flex-none px-4 py-2 bg-amber-500/10 text-amber-800 font-body-md text-body-md font-bold rounded-lg border border-amber-500/30 flex items-center justify-center gap-1.5 cursor-not-allowed shadow-none"
+              title={`Sorteo finalizado con número ganador #${raffle.winningNumber}`}
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-600">emoji_events</span>
+              Sorteo Finalizado (#{raffle.winningNumber})
+            </button>
+          ) : (
+            <button
+              onClick={handleTogglePause}
+              className="flex-1 md:flex-none px-4 py-2 border-2 border-primary text-primary font-body-md text-body-md font-semibold rounded-lg hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {raffle.status === 'paused' ? 'play_arrow' : 'pause'}
+              </span>
+              {raffle.status === 'paused' ? 'Reanudar Ventas' : 'Pausar Ventas'}
+            </button>
+          )}
           <button
             onClick={handleCancelRaffle}
-            disabled={raffle.status === 'cancelled'}
-            className="flex-1 md:flex-none px-4 py-2 border-2 border-error text-error font-body-md text-body-md font-semibold rounded-lg hover:bg-error-container transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+            disabled={raffle.status === 'cancelled' || Boolean(raffle.winningNumber) || raffle.status === 'completed'}
+            className="flex-1 md:flex-none px-4 py-2 border-2 border-error text-error font-body-md text-body-md font-semibold rounded-lg hover:bg-error-container transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span className="material-symbols-outlined text-[18px]">cancel</span>
             {raffle.status === 'cancelled' ? 'Rifa Cancelada' : 'Cancelar Rifa'}

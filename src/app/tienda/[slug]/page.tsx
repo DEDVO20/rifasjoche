@@ -35,6 +35,9 @@ interface PublicRaffleDetail {
   description: string;
   prizes: PublicPrize[];
   instantPrizes: PublicInstantPrize[];
+  status?: string;
+  winningNumber?: string;
+  evidenceUrl?: string;
 }
 
 export default function PublicTicketSelectionPage({ params }: { params: { slug: string } }) {
@@ -79,7 +82,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
         .from('raffles')
         .select(`
           *,
-          lottery_draws (id, lotteries (name)),
+          lottery_draws (id, winning_number, evidence_url, status, lotteries (name)),
           raffle_prizes (*)
         `);
 
@@ -147,6 +150,9 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             })
             : 'Próximamente',
           description: data.description || 'Participa y gana fabulosos premios con este sorteo verificado.',
+          status: data.status || 'active',
+          winningNumber: data.lottery_draws?.winning_number || undefined,
+          evidenceUrl: data.lottery_draws?.evidence_url || undefined,
           prizes: formattedPrizes.length > 0 ? formattedPrizes : [
             {
               name: '🏆 Premio Mayor',
@@ -342,10 +348,21 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               <span className="px-3 py-1 bg-tertiary-fixed-dim/20 text-on-tertiary-container rounded-full text-xs font-bold uppercase">
                 Sortea con {raffle?.lotteryName}
               </span>
-              <span className="px-3 py-1 bg-secondary-container/50 text-on-secondary-container rounded-full text-xs font-bold">
-                ⚠️ Compra Mínima: {minNumbersPerOrder} Boletos
-              </span>
-              {availableTickets <= 0 ? (
+              {raffle?.winningNumber ? (
+                <span className="px-3 py-1 bg-amber-500 text-white font-black rounded-full text-xs uppercase shadow-sm flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[14px]">emoji_events</span>
+                  Ganador: #{raffle.winningNumber}
+                </span>
+              ) : (
+                <span className="px-3 py-1 bg-secondary-container/50 text-on-secondary-container rounded-full text-xs font-bold">
+                  ⚠️ Compra Mínima: {minNumbersPerOrder} Boletos
+                </span>
+              )}
+              {raffle?.winningNumber ? (
+                <span className="px-3 py-1 bg-amber-100 text-amber-950 border border-amber-300 rounded-full text-xs font-bold">
+                  Sorteo Finalizado
+                </span>
+              ) : availableTickets <= 0 ? (
                 <span className="px-3 py-1 bg-rose-500/10 text-rose-700 border border-rose-300 rounded-full text-xs font-black uppercase">
                   ⛔ Agotado
                 </span>
@@ -368,6 +385,32 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             <div className="font-headline-md text-headline-md font-extrabold text-secondary-fixed-variant">
               ${pricePerTicket.toLocaleString('es-CO')} COP <span className="font-body-sm font-normal text-on-surface-variant">por boleto</span>
             </div>
+
+            {/* Banner de Ganador Publicado */}
+            {raffle?.winningNumber && (
+              <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-amber-950 p-4 sm:p-5 rounded-2xl shadow-xl border border-amber-300 flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-amber-800 shadow shrink-0">
+                    <span className="material-symbols-outlined text-[32px]">emoji_events</span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] uppercase font-black tracking-wider text-amber-900 block">
+                      ¡Sorteo Finalizado - Número Ganador Oficial!
+                    </span>
+                    <p className="text-sm sm:text-base font-bold text-amber-950">
+                      El número ganador publicado es <strong className="font-raffle-number text-xl bg-white/90 px-2.5 py-0.5 rounded-lg shadow-inner">#{raffle.winningNumber}</strong>
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/mis-boletos"
+                  className="px-5 py-2.5 bg-amber-950 text-white rounded-xl font-extrabold text-xs shadow hover:bg-black transition-colors shrink-0 flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[16px]">search</span>
+                  Consultar Mis Boletos
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -449,18 +492,43 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             <div className="flex justify-between items-center border-b border-outline-variant/20 pb-4">
               <div>
                 <h3 className="font-headline-md text-headline-md font-bold text-primary">
-                  Selecciona la Cantidad de Boletos
+                  {raffle?.winningNumber ? 'Sorteo Finalizado' : 'Selecciona la Cantidad de Boletos'}
                 </h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  Los números de tus boletos serán asignados automáticamente de forma aleatoria.
+                  {raffle?.winningNumber
+                    ? 'Este sorteo ya ha sido verificado y finalizado con el resultado oficial.'
+                    : 'Los números de tus boletos serán asignados automáticamente de forma aleatoria.'}
                 </p>
               </div>
               <span className="text-xs font-bold text-on-secondary-container bg-secondary-container px-3 py-1 rounded-full">
-                Asignación Aleatoria
+                {raffle?.winningNumber ? 'Resultado Oficial' : 'Asignación Aleatoria'}
               </span>
             </div>
 
-            {availableTickets <= 0 ? (
+            {raffle?.winningNumber ? (
+              <div className="p-8 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100 border-2 border-amber-300 rounded-2xl text-center space-y-4">
+                <div className="w-16 h-16 bg-amber-500 text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg">
+                  <span className="material-symbols-outlined text-[36px]">emoji_events</span>
+                </div>
+                <div>
+                  <h4 className="font-headline-md text-xl font-black text-amber-950">
+                    ¡Número Ganador Publicado: #{raffle.winningNumber}!
+                  </h4>
+                  <p className="text-xs sm:text-sm text-amber-900 max-w-md mx-auto mt-1">
+                    Las ventas para este sorteo se encuentran cerradas. Ingresa a la sección de consulta para verificar si tu boleto coincide con el número ganador.
+                  </p>
+                </div>
+                <div className="pt-2">
+                  <Link
+                    href="/mis-boletos"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-amber-950 text-white font-extrabold text-sm rounded-xl shadow-md hover:bg-black transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">search</span>
+                    Consultar Mis Boletos Comprados
+                  </Link>
+                </div>
+              </div>
+            ) : availableTickets <= 0 ? (
               <div className="p-6 bg-rose-50 border border-rose-300 rounded-2xl text-center space-y-2">
                 <span className="material-symbols-outlined text-4xl text-rose-600">block</span>
                 <h4 className="font-headline-md text-lg font-bold text-rose-900">

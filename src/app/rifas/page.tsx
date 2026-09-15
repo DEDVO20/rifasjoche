@@ -19,6 +19,7 @@ interface RaffleItem {
   minOrder: number;
   maxOrder: number;
   prizesCount: number;
+  winningNumber?: string;
 }
 
 export default function GestorRifasPage() {
@@ -29,7 +30,7 @@ export default function GestorRifasPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [lotteriesList, setLotteriesList] = useState<{ id: string; name: string }[]>([]);
 
-  const { success: toastSuccess, error: toastError, info: toastInfo } = useToast();
+  const { success: toastSuccess, error: toastError, warning: toastWarning, info: toastInfo } = useToast();
   const supabase = createClient();
 
   // Form states for new raffle
@@ -75,7 +76,7 @@ export default function GestorRifasPage() {
         .from('raffles')
         .select(`
           *,
-          lottery_draws (id, lotteries (name)),
+          lottery_draws (id, winning_number, evidence_url, status, lotteries (name)),
           raffle_prizes (id)
         `)
         .order('id', { ascending: false });
@@ -108,6 +109,7 @@ export default function GestorRifasPage() {
           minOrder: r.minimum_numbers_per_order || 2,
           maxOrder: r.maximum_numbers_per_order || 99999,
           prizesCount: r.raffle_prizes?.length || 1,
+          winningNumber: r.lottery_draws?.winning_number || undefined,
         }));
         setRaffles(formatted);
       } else {
@@ -292,6 +294,11 @@ export default function GestorRifasPage() {
   };
 
   const handleToggleStatus = async (raffleId: number, currentStatus: string) => {
+    const targetRaffle = raffles.find((r) => r.id === raffleId);
+    if (targetRaffle?.winningNumber || targetRaffle?.status === 'completed') {
+      toastWarning('Sorteo Finalizado', 'Esta rifa ya cuenta con un número ganador y no se pueden modificar sus ventas.');
+      return;
+    }
     const nextStatus = currentStatus === 'paused' ? 'active' : 'paused';
     try {
       await supabase.from('raffles').update({ status: nextStatus }).eq('id', raffleId);
@@ -360,7 +367,7 @@ export default function GestorRifasPage() {
       ) : filteredRaffles.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-base md:gap-gutter">
           {filteredRaffles.map((raffle) => {
-            const progress = Math.round((raffle.sold / raffle.total) * 100);
+            const hasWinner = Boolean(raffle.winningNumber) || raffle.status === 'completed';
 
             return (
               <div
@@ -376,22 +383,32 @@ export default function GestorRifasPage() {
                       alt={raffle.name}
                       className="w-full h-full object-cover"
                     />
-                    <div className="absolute top-3 right-3">
+                    <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                          raffle.status === 'active'
+                          hasWinner
+                            ? 'bg-amber-500 text-white shadow-md'
+                            : raffle.status === 'active'
                             ? 'bg-tertiary-fixed-dim/90 text-on-tertiary-container'
                             : raffle.status === 'paused'
                             ? 'bg-secondary-container text-on-secondary-container'
                             : 'bg-surface-tint/20 text-on-surface-variant'
                         }`}
                       >
-                        {raffle.status === 'active'
+                        {hasWinner
+                          ? 'Finalizada'
+                          : raffle.status === 'active'
                           ? 'Activa'
                           : raffle.status === 'paused'
                           ? 'Pausada'
                           : 'Finalizada'}
                       </span>
+                      {raffle.winningNumber && (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-sm flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px] text-amber-700">emoji_events</span>
+                          Ganador: #{raffle.winningNumber}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -426,15 +443,27 @@ export default function GestorRifasPage() {
                     <span className="material-symbols-outlined text-[16px]">visibility</span>
                     Ver Talonario
                   </Link>
-                  <button
-                    onClick={() => handleToggleStatus(raffle.id, raffle.status)}
-                    className="px-3 py-2 border border-outline-variant rounded-lg font-body-sm text-xs font-semibold hover:bg-surface-container-high transition-colors"
-                    title={raffle.status === 'paused' ? 'Reanudar Ventas' : 'Pausar Ventas'}
-                  >
-                    <span className="material-symbols-outlined text-[18px]">
-                      {raffle.status === 'paused' ? 'play_arrow' : 'pause'}
-                    </span>
-                  </button>
+                  {hasWinner ? (
+                    <button
+                      disabled
+                      className="px-3 py-2 border border-outline-variant/40 bg-surface-container-high text-on-surface-variant/50 rounded-lg font-body-sm text-xs font-semibold cursor-not-allowed"
+                      title={`Sorteo finalizado con número ganador #${raffle.winningNumber || ''}`}
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-amber-600">
+                        emoji_events
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleToggleStatus(raffle.id, raffle.status)}
+                      className="px-3 py-2 border border-outline-variant rounded-lg font-body-sm text-xs font-semibold hover:bg-surface-container-high transition-colors"
+                      title={raffle.status === 'paused' ? 'Reanudar Ventas' : 'Pausar Ventas'}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {raffle.status === 'paused' ? 'play_arrow' : 'pause'}
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
             );
