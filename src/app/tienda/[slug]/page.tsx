@@ -212,8 +212,16 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (file.size > 15 * 1024 * 1024) {
+        toastError('Archivo muy grande', 'El comprobante no debe superar los 15 MB.');
+        return;
+      }
       setProofFile(file);
-      setProofPreview(URL.createObjectURL(file));
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        setProofPreview(null);
+      } else {
+        setProofPreview(URL.createObjectURL(file));
+      }
       toastInfo('Comprobante Seleccionado', `${file.name} listo para subir.`);
     }
   };
@@ -236,12 +244,9 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       setIsSubmitting(true);
       let uploadedProofUrl = '';
 
-      // 1. Convertir a Data URL permanente o subir al bucket 'comprobantes'
+      // 1. Subir al servidor/storage a través de /api/upload-proof
       if (proofFile) {
         try {
-          const clientDataUrl = await fileToDataUrl(proofFile);
-          uploadedProofUrl = clientDataUrl;
-
           const uploadFormData = new FormData();
           uploadFormData.append('file', proofFile);
 
@@ -255,9 +260,17 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             if (uploadJson.publicUrl) {
               uploadedProofUrl = uploadJson.publicUrl;
             }
+          } else {
+            console.warn('Fallo en /api/upload-proof, intentando fallback');
+            if (proofFile.size < 3 * 1024 * 1024) {
+              uploadedProofUrl = await fileToDataUrl(proofFile);
+            }
           }
         } catch (uploadErr) {
-          console.warn('Fallback en subida de comprobante:', uploadErr);
+          console.warn('Excepción en subida de comprobante, fallback:', uploadErr);
+          if (proofFile.size < 3 * 1024 * 1024) {
+            uploadedProofUrl = await fileToDataUrl(proofFile);
+          }
         }
       }
 
