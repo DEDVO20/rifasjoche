@@ -77,6 +77,25 @@ export async function POST(req: NextRequest) {
 
     const takenSet = new Set((soldRows || []).map((r) => r.number));
     const totalPossible = raffle.total_numbers || 10000;
+    const availableCount = Math.max(0, totalPossible - takenSet.size);
+
+    if (availableCount <= 0) {
+      return NextResponse.json(
+        { error: 'Lo sentimos, este sorteo ya se encuentra completamente agotado.', availableCount: 0 },
+        { status: 400 }
+      );
+    }
+
+    if (quantity > availableCount) {
+      return NextResponse.json(
+        {
+          error: `Solo quedan ${availableCount} boletos disponibles para este sorteo. El máximo que puedes comprar es ${availableCount}.`,
+          availableCount,
+        },
+        { status: 400 }
+      );
+    }
+
     const assignedNumbers: string[] = [];
 
     let attempts = 0;

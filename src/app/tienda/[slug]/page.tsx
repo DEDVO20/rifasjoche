@@ -27,6 +27,9 @@ interface PublicRaffleDetail {
   image: string;
   pricePerTicket: number;
   minOrder: number;
+  maxOrder: number;
+  totalNumbers: number;
+  availableTickets: number;
   lotteryName: string;
   drawDate: string;
   description: string;
@@ -67,7 +70,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
     email: '',
   });
 
-  // Cargar Rifa y sus Premios reales desde Supabase por slug o ID
+  // Cargar Rifa, Premios y Boletos Disponibles desde Supabase por slug o ID
   const loadRaffleDetail = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -89,6 +92,16 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       const { data, error } = await query.single();
 
       if (!error && data) {
+        // Consultar boletos ya ocupados (vendidos o reservados)
+        const { data: takenNumbers } = await supabase
+          .from('raffle_numbers')
+          .select('number')
+          .eq('raffle_id', data.id);
+
+        const totalNums = data.total_numbers || 1000;
+        const takenCount = (takenNumbers || []).length;
+        const availableTickets = Math.max(0, totalNums - takenCount);
+
         const rawPrizes = data.raffle_prizes || [];
 
         // 1. Premios de sorteo regulares (Mayor y Secundarios)
@@ -110,7 +123,10 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
           valueText: p.prize_value ? `$${Number(p.prize_value).toLocaleString('es-CO')} COP` : 'Premio Directo',
         }));
 
-        const minQty = data.minimum_numbers_per_order || 1;
+        const rawMinQty = data.minimum_numbers_per_order || 1;
+        const rawMaxQty = data.maximum_numbers_per_order || totalNums;
+        const effectiveMin = availableTickets > 0 ? Math.min(rawMinQty, availableTickets) : 0;
+        const effectiveMax = Math.min(rawMaxQty, availableTickets);
 
         const formattedRaffle: PublicRaffleDetail = {
           id: data.id,
@@ -118,7 +134,10 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
           slug: data.slug || `sorteo-${data.id}`,
           image: data.image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
           pricePerTicket: Number(data.price_per_number) || 10000,
-          minOrder: minQty,
+          minOrder: effectiveMin,
+          maxOrder: effectiveMax,
+          totalNumbers: totalNums,
+          availableTickets,
           lotteryName: data.lottery_draws?.lotteries?.name || 'Lotería Oficial',
           drawDate: data.end_at
             ? new Date(data.end_at).toLocaleDateString('es-CO', {
@@ -140,7 +159,9 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
         };
 
         setRaffle(formattedRaffle);
-        setTicketQuantity(minQty);
+
+        const initialQty = availableTickets <= 0 ? 0 : Math.min(effectiveMax, Math.max(effectiveMin, 1));
+        setTicketQuantity(initialQty);
       }
     } catch (err) {
       console.error('Error cargando detalle de rifa:', err);
@@ -166,12 +187,18 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
   }, [profile, user]);
 
   const pricePerTicket = raffle?.pricePerTicket || 10000;
-  const minNumbersPerOrder = raffle?.minOrder || 1;
+  const availableTickets = raffle?.availableTickets ?? 1000;
+  const maxAllowedTickets = Math.min(raffle?.maxOrder || availableTickets, availableTickets);
+  const minNumbersPerOrder = availableTickets > 0 ? Math.min(raffle?.minOrder || 1, availableTickets) : 0;
   const totalAmount = ticketQuantity * pricePerTicket;
-  const isMinMet = ticketQuantity >= minNumbersPerOrder;
+  const isMinMet = ticketQuantity >= minNumbersPerOrder && ticketQuantity <= maxAllowedTickets && ticketQuantity > 0;
 
   const handleQuantityChange = (newQty: number) => {
-    const clamped = Math.max(minNumbersPerOrder, newQty);
+    if (availableTickets <= 0) {
+      setTicketQuantity(0);
+      return;
+    }
+    const clamped = Math.min(maxAllowedTickets, Math.max(minNumbersPerOrder, newQty));
     setTicketQuantity(clamped);
   };
 
@@ -305,6 +332,19 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               <span className="px-3 py-1 bg-secondary-container/50 text-on-secondary-container rounded-full text-xs font-bold">
                 ⚠️ Compra Mínima: {minNumbersPerOrder} Boletos
               </span>
+              {availableTickets <= 0 ? (
+                <span className="px-3 py-1 bg-rose-500/10 text-rose-700 border border-rose-300 rounded-full text-xs font-black uppercase">
+                  ⛔ Agotado
+                </span>
+              ) : availableTickets <= 10 ? (
+                <span className="px-3 py-1 bg-rose-500/10 text-rose-700 border border-rose-300 rounded-full text-xs font-bold animate-pulse">
+                  ⚡ ¡Últimos {availableTickets} Boletos Disponibles!
+                </span>
+              ) : (
+                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-700 border border-emerald-300 rounded-full text-xs font-bold">
+                  🎟️ {availableTickets.toLocaleString()} Boletos Disponibles
+                </span>
+              )}
             </div>
             <h1 className="font-display-lg text-[28px] md:text-[36px] font-extrabold text-primary">
               {raffle?.name}
@@ -407,63 +447,128 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               </span>
             </div>
 
-            {/* Paquetes de Selección Rápida */}
-            <div className="space-y-2">
-              <label className="font-body-sm text-body-sm font-bold text-primary block">
-                Paquetes Rápidos:
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { qty: minNumbersPerOrder, label: `${minNumbersPerOrder} Boletos`, badge: 'Mínimo' },
-                  { qty: minNumbersPerOrder + 3, label: `${minNumbersPerOrder + 3} Boletos`, badge: 'Popular ⭐' },
-                  { qty: minNumbersPerOrder + 8, label: `${minNumbersPerOrder + 8} Boletos`, badge: 'Más Oportunidad' },
-                  { qty: minNumbersPerOrder + 18, label: `${minNumbersPerOrder + 18} Boletos`, badge: 'Mega Combo' },
-                ].map((pack) => (
-                  <button
-                    key={pack.qty}
-                    type="button"
-                    onClick={() => setTicketQuantity(pack.qty)}
-                    className={`p-4 rounded-xl text-center border transition-all ${ticketQuantity === pack.qty
-                        ? 'border-2 border-primary bg-secondary-container text-on-secondary-container shadow-md scale-105 font-bold'
-                        : 'border-outline-variant hover:border-primary hover:bg-surface-container'
-                      }`}
-                  >
-                    <div className="font-headline-md text-headline-md font-extrabold">{pack.label}</div>
-                    <span className="text-[10px] font-bold uppercase opacity-80">{pack.badge}</span>
-                  </button>
-                ))}
+            {availableTickets <= 0 ? (
+              <div className="p-6 bg-rose-50 border border-rose-300 rounded-2xl text-center space-y-2">
+                <span className="material-symbols-outlined text-4xl text-rose-600">block</span>
+                <h4 className="font-headline-md text-lg font-bold text-rose-900">
+                  Sorteo Completamente Agotado
+                </h4>
+                <p className="text-xs text-rose-700 max-w-md mx-auto">
+                  Todos los boletos de esta rifa han sido vendidos. Consulta nuestras otras rifas disponibles en la tienda.
+                </p>
               </div>
-            </div>
-
-            {/* Selector Manual (- y +) */}
-            <div className="p-6 bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-3 text-center">
-              <label className="font-body-sm text-body-sm font-bold text-primary block">
-                O ajusta libremente la cantidad deseada:
-              </label>
-              <div className="flex items-center justify-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(ticketQuantity - 1)}
-                  disabled={ticketQuantity <= minNumbersPerOrder}
-                  className="w-12 h-12 rounded-xl bg-surface-container-high text-primary font-extrabold text-2xl hover:bg-surface-container-highest transition-colors disabled:opacity-30"
-                >
-                  -
-                </button>
-                <div className="px-6 py-2 bg-surface-container-lowest border border-outline-variant rounded-xl text-center min-w-[120px]">
-                  <span className="font-display-lg text-display-lg font-extrabold text-primary block">
-                    {ticketQuantity}
-                  </span>
-                  <span className="text-xs text-on-surface-variant font-medium">boletos</span>
+            ) : (
+              <>
+                {/* Paquetes de Selección Rápida */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="font-body-sm text-body-sm font-bold text-primary block">
+                      Paquetes Rápidos:
+                    </label>
+                    <span className="text-xs text-on-surface-variant font-medium">
+                      Disponibles: <strong className="text-primary">{availableTickets}</strong>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { qty: minNumbersPerOrder, label: `${minNumbersPerOrder} Boleto${minNumbersPerOrder > 1 ? 's' : ''}`, badge: 'Mínimo' },
+                      { qty: minNumbersPerOrder + 3, label: `${minNumbersPerOrder + 3} Boletos`, badge: 'Popular ⭐' },
+                      { qty: minNumbersPerOrder + 8, label: `${minNumbersPerOrder + 8} Boletos`, badge: 'Más Oportunidad' },
+                      {
+                        qty: maxAllowedTickets <= 20 && maxAllowedTickets > minNumbersPerOrder + 8
+                          ? maxAllowedTickets
+                          : minNumbersPerOrder + 18,
+                        label: maxAllowedTickets <= 20 && maxAllowedTickets > minNumbersPerOrder + 8
+                          ? `${maxAllowedTickets} Boletos`
+                          : `${minNumbersPerOrder + 18} Boletos`,
+                        badge: maxAllowedTickets <= 20 && maxAllowedTickets > minNumbersPerOrder + 8
+                          ? 'Máx. Disponible ⚡'
+                          : 'Mega Combo',
+                      },
+                    ]
+                      .filter((pack, idx, arr) => arr.findIndex((p) => p.qty === pack.qty) === idx)
+                      .map((pack) => {
+                        const isPackOverLimit = pack.qty > maxAllowedTickets;
+                        return (
+                          <button
+                            key={pack.qty}
+                            type="button"
+                            disabled={isPackOverLimit}
+                            onClick={() => setTicketQuantity(pack.qty)}
+                            className={`p-4 rounded-xl text-center border transition-all ${
+                              isPackOverLimit
+                                ? 'border-outline-variant/30 bg-surface-container-low/50 opacity-40 cursor-not-allowed text-on-surface-variant'
+                                : ticketQuantity === pack.qty
+                                ? 'border-2 border-primary bg-secondary-container text-on-secondary-container shadow-md scale-105 font-bold'
+                                : 'border-outline-variant hover:border-primary hover:bg-surface-container'
+                            }`}
+                          >
+                            <div className="font-headline-md text-headline-md font-extrabold">{pack.label}</div>
+                            <span className="text-[10px] font-bold uppercase opacity-80 block mt-0.5">
+                              {isPackOverLimit ? `Quedan ${availableTickets}` : pack.badge}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleQuantityChange(ticketQuantity + 1)}
-                  className="w-12 h-12 rounded-xl bg-primary text-on-primary font-extrabold text-2xl hover:bg-primary-container transition-colors"
-                >
-                  +
-                </button>
-              </div>
-            </div>
+
+                {/* Selector Manual (- y +) con Límite Máximo Estricto */}
+                <div className="p-6 bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-3 text-center">
+                  <label className="font-body-sm text-body-sm font-bold text-primary block">
+                    O ajusta libremente la cantidad deseada (máx. {maxAllowedTickets}):
+                  </label>
+                  <div className="flex items-center justify-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(ticketQuantity - 1)}
+                      disabled={ticketQuantity <= minNumbersPerOrder}
+                      className="w-12 h-12 rounded-xl bg-surface-container-high text-primary font-extrabold text-2xl hover:bg-surface-container-highest transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      -
+                    </button>
+                    <div className="px-6 py-2 bg-surface-container-lowest border border-outline-variant rounded-xl text-center min-w-[140px]">
+                      <input
+                        type="number"
+                        min={minNumbersPerOrder}
+                        max={maxAllowedTickets}
+                        value={ticketQuantity || ''}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          if (isNaN(val)) {
+                            setTicketQuantity(0);
+                          } else {
+                            handleQuantityChange(val);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!ticketQuantity || ticketQuantity < minNumbersPerOrder) {
+                            handleQuantityChange(minNumbersPerOrder);
+                          }
+                        }}
+                        className="font-display-lg text-display-lg font-extrabold text-primary block w-full text-center bg-transparent border-none focus:outline-none"
+                      />
+                      <span className="text-xs text-on-surface-variant font-medium">
+                        boletos (máx. {maxAllowedTickets})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleQuantityChange(ticketQuantity + 1)}
+                      disabled={ticketQuantity >= maxAllowedTickets}
+                      className="w-12 h-12 rounded-xl bg-primary text-on-primary font-extrabold text-2xl hover:bg-primary-container transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      +
+                    </button>
+                  </div>
+                  {ticketQuantity >= maxAllowedTickets && (
+                    <p className="text-xs text-amber-700 font-semibold mt-1">
+                      ⚠️ Has alcanzado el máximo disponible de este sorteo ({maxAllowedTickets} boletos).
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -488,6 +593,12 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
                 <span>Asignación</span>
                 <span className="text-xs font-bold text-emerald-600">Aleatoria Automática</span>
               </div>
+              <div className="flex justify-between text-on-surface-variant">
+                <span>Disponibles en el Sorteo</span>
+                <span className={`text-xs font-bold ${availableTickets <= 10 ? 'text-rose-600' : 'text-primary'}`}>
+                  {availableTickets} boletos
+                </span>
+              </div>
             </div>
 
             <div className="pt-4 border-t border-outline-variant/20 space-y-2">
@@ -498,7 +609,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             </div>
 
             <button
-              disabled={!isMinMet}
+              disabled={!isMinMet || availableTickets <= 0}
               onClick={() => {
                 setCheckoutStep(1);
                 setIsCheckoutOpen(true);
@@ -506,7 +617,9 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               className="w-full py-4 bg-primary text-on-primary rounded-xl font-body-md text-body-md font-extrabold shadow-lg hover:bg-primary-container disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
             >
               <span className="material-symbols-outlined">payments</span>
-              Comprar y Transferir (${totalAmount.toLocaleString('es-CO')})
+              {availableTickets <= 0
+                ? 'Sorteo Agotado'
+                : `Comprar y Transferir ($${totalAmount.toLocaleString('es-CO')})`}
             </button>
           </div>
         </div>
