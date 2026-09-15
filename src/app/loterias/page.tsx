@@ -100,12 +100,14 @@ export default function LoteriasPage() {
     if (!selectedDraw || !inputWinningNumber) return;
 
     try {
+      const cleanNumber = inputWinningNumber.trim().padStart(4, '0');
+
       await supabase
         .from('lottery_draws')
         .update({
-          winning_number: inputWinningNumber,
-          winning_series: inputWinningSeries,
-          official_source_url: inputSourceUrl,
+          winning_number: cleanNumber,
+          winning_series: inputWinningSeries.trim(),
+          official_source_url: inputSourceUrl.trim(),
           status: 'verified',
         })
         .eq('id', selectedDraw.id);
@@ -115,9 +117,9 @@ export default function LoteriasPage() {
           d.id === selectedDraw.id
             ? {
                 ...d,
-                winningNumber: inputWinningNumber,
-                winningSeries: inputWinningSeries,
-                officialSourceUrl: inputSourceUrl,
+                winningNumber: cleanNumber,
+                winningSeries: inputWinningSeries.trim(),
+                officialSourceUrl: inputSourceUrl.trim(),
                 status: 'verified',
               }
             : d

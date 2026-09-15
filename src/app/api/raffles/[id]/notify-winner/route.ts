@@ -55,12 +55,30 @@ export async function POST(
       : 'Fecha oficial';
 
     // 2. Buscar el boleto ganador en raffle_numbers
-    const { data: winningTicket, error: ticketError } = await supabase
+    const numLength =
+      (raffle as any)?.number_length ||
+      ((raffle as any)?.total_numbers
+        ? ((raffle as any).total_numbers - 1).toString().length
+        : 4);
+    const cleanNum = winningNumber.trim();
+    const paddedWinningNumber = cleanNum.padStart(numLength, '0');
+    const numVal = parseInt(cleanNum, 10);
+
+    let ticketQuery = supabase
       .from('raffle_numbers')
       .select('id, number, status, order_id')
-      .eq('raffle_id', raffleId)
-      .eq('number', winningNumber)
-      .maybeSingle();
+      .eq('raffle_id', raffleId);
+
+    if (!isNaN(numVal)) {
+      ticketQuery = ticketQuery.or(
+        `number.eq.${cleanNum},number.eq.${paddedWinningNumber},numeric_value.eq.${numVal}`
+      );
+    } else {
+      ticketQuery = ticketQuery.or(`number.eq.${cleanNum},number.eq.${paddedWinningNumber}`);
+    }
+
+    const { data: winningTickets, error: ticketError } = await ticketQuery.limit(1);
+    const winningTicket = winningTickets && winningTickets.length > 0 ? winningTickets[0] : null;
 
     if (ticketError) {
       return NextResponse.json({ error: 'Error al consultar boletos de la rifa', details: ticketError }, { status: 500 });
@@ -70,8 +88,8 @@ export async function POST(
       return NextResponse.json({
         success: false,
         notSold: true,
-        winningNumber,
-        message: `El número ganador oficial #${winningNumber} no fue comprado por ningún participante.`,
+        winningNumber: winningTicket?.number || paddedWinningNumber,
+        message: `El número ganador oficial #${winningTicket?.number || paddedWinningNumber} no fue comprado por ningún participante.`,
       });
     }
 

@@ -104,35 +104,79 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         soldMap.set(row.number, row.status === 'reserved' ? 'reserved' : 'sold');
       });
 
-      // 3. Obtener órdenes reales de compra
-      const { data: ordersData } = await supabase
+      // 3. Obtener órdenes reales de compra de esta rifa (soporta clientes registrados e invitados)
+      const { data: rawOrdersData, error: ordersErr } = await supabase
         .from('orders')
-        .select(`
-          id,
-          order_number,
-          total,
-          status,
-          payment_status,
-          created_at,
-          profiles (full_name, email),
-          raffle_numbers (number)
-        `)
+        .select('id, order_number, user_id, raffle_id, total, status, payment_status, created_at')
         .eq('raffle_id', params.id)
-        .order('created_at', { ascending: false });
+        .order('id', { ascending: false });
 
-      const realOrders: SaleOrder[] = (ordersData || []).map((ord: any) => ({
-        id: ord.id.toString(),
-        orderNumber: ord.order_number || `ORD-${ord.id}`,
-        clientName: ord.profiles?.full_name || 'Cliente Registrado',
-        clientEmail: ord.profiles?.email || 'cliente@email.com',
-        tickets: ord.raffle_numbers ? ord.raffle_numbers.map((rn: any) => rn.number) : [],
-        total: Number(ord.total) || 0,
-        status: ord.payment_status === 'approved' || ord.status === 'confirmed' ? 'approved' : 'pending',
-        date: new Date(ord.created_at).toLocaleString('es-CO', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        }),
-      }));
+      if (ordersErr) {
+        console.error('Error cargando órdenes de la rifa:', ordersErr);
+      }
+
+      let realOrders: SaleOrder[] = [];
+
+      if (rawOrdersData && rawOrdersData.length > 0) {
+        const orderIds = rawOrdersData.map((o) => o.id);
+        const userIds = Array.from(
+          new Set(rawOrdersData.map((o) => o.user_id).filter(Boolean))
+        ) as string[];
+
+        const [profilesResult, paymentsResult, numbersResult] = await Promise.all([
+          userIds.length
+            ? supabase.from('profiles').select('id, full_name, email, phone').in('id', userIds)
+            : Promise.resolve({ data: [], error: null }),
+          supabase.from('payments').select('order_id, provider, metadata, status').in('order_id', orderIds),
+          supabase.from('raffle_numbers').select('order_id, number').in('order_id', orderIds).order('number', { ascending: true }),
+        ]);
+
+        const profilesById = new Map((profilesResult.data || []).map((p: any) => [p.id, p]));
+        const paymentsByOrderId = new Map<number, any>();
+        (paymentsResult.data || []).forEach((p: any) => {
+          if (!paymentsByOrderId.has(p.order_id)) {
+            paymentsByOrderId.set(p.order_id, p);
+          }
+        });
+
+        const numbersByOrderId = new Map<number, string[]>();
+        (numbersResult.data || []).forEach((row: any) => {
+          const cur = numbersByOrderId.get(row.order_id) || [];
+          cur.push(row.number);
+          numbersByOrderId.set(row.order_id, cur);
+        });
+
+        realOrders = rawOrdersData.map((ord: any) => {
+          const profile = ord.user_id ? profilesById.get(ord.user_id) : null;
+          const payment = paymentsByOrderId.get(ord.id);
+          const payMeta = payment?.metadata || {};
+
+          const clientName = payMeta?.customer_name || profile?.full_name || 'Comprador';
+          const clientEmail = payMeta?.customer_email || profile?.email || 'Sin correo';
+          const tickets = numbersByOrderId.get(ord.id) || [];
+
+          let computedStatus: 'approved' | 'pending' | 'rejected' = 'pending';
+          if (ord.status === 'confirmed' || ord.payment_status === 'approved') {
+            computedStatus = 'approved';
+          } else if (ord.status === 'cancelled' || ord.status === 'rejected') {
+            computedStatus = 'rejected';
+          }
+
+          return {
+            id: ord.id.toString(),
+            orderNumber: ord.order_number || `ORD-${ord.id}`,
+            clientName,
+            clientEmail,
+            tickets,
+            total: Number(ord.total) || 0,
+            status: computedStatus,
+            date: new Date(ord.created_at).toLocaleString('es-CO', {
+              dateStyle: 'short',
+              timeStyle: 'short',
+            }),
+          };
+        });
+      }
 
       setSalesOrders(realOrders);
 
@@ -172,17 +216,33 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
       setInputWinningNumber(currentWinningNumber);
       setInputEvidenceUrl(raffleData.lottery_draws?.evidence_url || '');
 
-      // Validar si ya tiene número ganador para bloquearlo
+      // Validar si ya tiene número ganador para buscar ganador y bloquearlo
       if (currentWinningNumber) {
         setIsResultLocked(true);
 
-        // Buscar el boleto ganador en raffle_numbers
-        const { data: winTicket } = await supabase
+        const numLength =
+          raffleData.number_length ||
+          (raffleData.total_numbers ? (raffleData.total_numbers - 1).toString().length : 4);
+        const cleanNum = currentWinningNumber.trim();
+        const paddedWinningNumber = cleanNum.padStart(numLength, '0');
+        const numVal = parseInt(cleanNum, 10);
+
+        // Buscar el boleto ganador en raffle_numbers (por formato exacto, con ceros o valor numérico)
+        let ticketQuery = supabase
           .from('raffle_numbers')
           .select('id, number, status, order_id')
-          .eq('raffle_id', params.id)
-          .eq('number', currentWinningNumber)
-          .maybeSingle();
+          .eq('raffle_id', params.id);
+
+        if (!isNaN(numVal)) {
+          ticketQuery = ticketQuery.or(
+            `number.eq.${cleanNum},number.eq.${paddedWinningNumber},numeric_value.eq.${numVal}`
+          );
+        } else {
+          ticketQuery = ticketQuery.or(`number.eq.${cleanNum},number.eq.${paddedWinningNumber}`);
+        }
+
+        const { data: winTicketList } = await ticketQuery.limit(1);
+        const winTicket = winTicketList && winTicketList.length > 0 ? winTicketList[0] : null;
 
         if (winTicket && winTicket.status === 'sold' && winTicket.order_id) {
           const { data: winOrder } = await supabase
@@ -231,7 +291,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
             name,
             email,
             phone,
-            number: currentWinningNumber,
+            number: winTicket.number || paddedWinningNumber,
             orderNumber: winOrder?.order_number,
             prizeName: mainPrize.name || 'Gran Premio',
             prizeValue: mainPrize.prize_value ? Number(mainPrize.prize_value) : undefined,
@@ -323,6 +383,13 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
     try {
       setIsSavingResult(true);
+
+      const numLength =
+        raffle.number_length ||
+        (raffle.totalNumbers ? (raffle.totalNumbers - 1).toString().length : 4);
+      const cleanNum = inputWinningNumber.trim();
+      const formattedWinningNumber = cleanNum.padStart(numLength, '0');
+
       // Actualizar en lottery_draws
       const { data: rData } = await supabase
         .from('raffles')
@@ -334,7 +401,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         await supabase
           .from('lottery_draws')
           .update({
-            winning_number: inputWinningNumber,
+            winning_number: formattedWinningNumber,
             evidence_url: inputEvidenceUrl,
             status: 'verified',
           })
@@ -349,14 +416,15 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
       setRaffle({
         ...raffle,
-        winningNumber: inputWinningNumber,
+        winningNumber: formattedWinningNumber,
         evidenceUrl: inputEvidenceUrl,
         status: 'completed',
       });
 
+      setInputWinningNumber(formattedWinningNumber);
       setIsResultLocked(true);
       await loadRaffleDetails();
-      alert('🔒 ¡Resultado oficial guardado y verificado! El número ganador ha quedado bloqueado.');
+      alert(`🔒 ¡Resultado oficial guardado (#${formattedWinningNumber}) y verificado! El número ganador ha quedado bloqueado.`);
     } catch (err) {
       console.error('Error guardando resultado:', err);
     } finally {
