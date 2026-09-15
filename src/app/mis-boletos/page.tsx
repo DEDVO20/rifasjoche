@@ -210,19 +210,28 @@ export default function MisBoletosPage() {
                         </div>
                       </div>
 
-                      {/* Datos del Comprador */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-surface-container-low p-3.5 rounded-xl text-xs sm:text-sm">
-                        <div>
-                          <span className="text-on-surface-variant block font-medium">Titular:</span>
-                          <strong className="text-primary truncate block">{res.customerName}</strong>
+                      {/* Datos del Comprador (Protegidos por Privacidad) */}
+                      <div className="bg-surface-container-low p-3.5 rounded-xl text-xs sm:text-sm border border-outline-variant/10 space-y-2">
+                        <div className="flex items-center justify-between border-b border-outline-variant/10 pb-1.5 text-[11px] text-on-surface-variant font-medium">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px] text-emerald-600">lock</span>
+                            Datos del Comprador (Protegidos)
+                          </span>
+                          <span className="text-[10px] uppercase font-bold text-outline">Privacidad Activa</span>
                         </div>
-                        <div>
-                          <span className="text-on-surface-variant block font-medium">Celular / Tel:</span>
-                          <strong className="text-primary truncate block">{res.customerPhone}</strong>
-                        </div>
-                        <div>
-                          <span className="text-on-surface-variant block font-medium">Correo:</span>
-                          <strong className="text-primary truncate block">{res.customerEmail}</strong>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                          <div>
+                            <span className="text-on-surface-variant block text-xs">Titular:</span>
+                            <strong className="text-primary truncate block font-mono text-xs sm:text-sm">{res.customerName}</strong>
+                          </div>
+                          <div>
+                            <span className="text-on-surface-variant block text-xs">Celular / Tel:</span>
+                            <strong className="text-primary truncate block font-mono text-xs sm:text-sm">{res.customerPhone}</strong>
+                          </div>
+                          <div>
+                            <span className="text-on-surface-variant block text-xs">Correo:</span>
+                            <strong className="text-primary truncate block font-mono text-xs sm:text-sm">{res.customerEmail}</strong>
+                          </div>
                         </div>
                       </div>
 

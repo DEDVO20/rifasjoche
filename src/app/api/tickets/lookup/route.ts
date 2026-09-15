@@ -1,6 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+function maskName(name: string): string {
+  if (!name || name.trim() === '' || name === 'Cliente' || name === 'Comprador') {
+    return 'Cliente';
+  }
+  const parts = name.trim().split(/\s+/);
+  return parts
+    .map((p) => {
+      if (p.length <= 2) return p.charAt(0) + '*';
+      return p.charAt(0) + '***' + p.charAt(p.length - 1);
+    })
+    .join(' ');
+}
+
+function maskPhone(phone: string): string {
+  if (!phone || phone.trim() === '' || phone.includes('Sin')) return '••• ••• •••';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return `${digits.slice(0, 3)} ••• ••${digits.slice(-2)}`;
+  }
+  if (digits.length >= 7) {
+    return `${digits.slice(0, 2)} ••• •${digits.slice(-2)}`;
+  }
+  return `${phone.slice(0, 2)}••••`;
+}
+
+function maskEmail(email: string): string {
+  if (!email || !email.includes('@') || email.includes('Sin')) return '••••@••••.com';
+  const [local, domain] = email.split('@');
+  if (local.length <= 2) {
+    return `${local.charAt(0)}***@${domain}`;
+  }
+  return `${local.charAt(0)}***${local.charAt(local.length - 1)}@${domain}`;
+}
+
+function maskDocument(doc: string): string {
+  if (!doc || doc.trim() === '') return '';
+  const clean = doc.trim();
+  if (clean.length > 5) {
+    return `${clean.slice(0, 3)}•••••${clean.slice(-2)}`;
+  }
+  return `${clean.slice(0, 1)}••••`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -36,7 +79,6 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Búsqueda por número de boleto (ej. "0075", "75", "123")
-    // Probar número exacto y variantes con relleno de ceros
     const ticketVariations = [
       cleanQuery,
       cleanQuery.padStart(2, '0'),
@@ -152,20 +194,20 @@ export async function POST(req: NextRequest) {
       ticketsByOrder.set(row.order_id, current);
     });
 
-    // 7. Formatear y construir resultado
+    // 7. Formatear y construir resultado con PROTECCIÓN DE DATOS (Enmascaramiento)
     const formattedResults = ordersData.map((order: any) => {
       const numbers = ticketsByOrder.get(order.id) || [];
       const payment = Array.isArray(order.payments) ? order.payments[0] : order.payments;
       const payMeta = payment?.metadata || {};
       const profile = order.profiles || {};
 
-      const customerName =
+      const rawCustomerName =
         payMeta.customer_name || profile.full_name || 'Cliente';
-      const customerEmail =
-        payMeta.customer_email || profile.email || 'Sin correo registrado';
-      const customerPhone =
-        payMeta.customer_phone || profile.phone || 'Sin teléfono registrado';
-      const customerDocument =
+      const rawCustomerEmail =
+        payMeta.customer_email || profile.email || '';
+      const rawCustomerPhone =
+        payMeta.customer_phone || profile.phone || '';
+      const rawCustomerDocument =
         payMeta.customer_document || profile.document_number || '';
 
       const raffle = order.raffles || {};
@@ -190,10 +232,10 @@ export async function POST(req: NextRequest) {
       return {
         id: order.id,
         orderNumber: order.order_number || `ORD-${order.id}`,
-        customerName,
-        customerEmail,
-        customerPhone,
-        customerDocument,
+        customerName: maskName(rawCustomerName),
+        customerEmail: maskEmail(rawCustomerEmail),
+        customerPhone: maskPhone(rawCustomerPhone),
+        customerDocument: maskDocument(rawCustomerDocument),
         raffleName,
         drawDate,
         lotteryName,
