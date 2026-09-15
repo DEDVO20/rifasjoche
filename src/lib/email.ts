@@ -183,3 +183,179 @@ export async function sendTicketConfirmationEmail({
     return { success: false, error: err.message };
   }
 }
+
+export interface WinnerNotificationEmailParams {
+  to: string;
+  customerName: string;
+  raffleName: string;
+  lotteryName: string;
+  drawDate: string;
+  winningNumber: string;
+  prizeName: string;
+  prizeValue?: number;
+  orderNumber?: string;
+  evidenceUrl?: string;
+}
+
+export async function sendWinnerNotificationEmail({
+  to,
+  customerName,
+  raffleName,
+  lotteryName,
+  drawDate,
+  winningNumber,
+  prizeName,
+  prizeValue,
+  orderNumber,
+  evidenceUrl,
+}: WinnerNotificationEmailParams) {
+  try {
+    const apiKey = process.env.RESEND_API_KEY?.trim() || '';
+    if (!apiKey) {
+      console.warn('⚠️ RESEND_API_KEY no está configurada en el archivo .env');
+      return { success: false, error: 'RESEND_API_KEY no configurada' };
+    }
+
+    const resend = new Resend(apiKey);
+
+    const formattedValue = prizeValue ? `$${prizeValue.toLocaleString('es-CO')} COP` : '';
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>¡Felicidades Ganador!</title>
+      </head>
+      <body style="margin:0; padding:0; background-color:#0f172a; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color:#1e293b;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#0f172a; padding:40px 10px;">
+          <tr>
+            <td align="center">
+              <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:20px; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); border:2px solid #f59e0b;">
+                <!-- Header Dorado y Festivo -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #78350f 0%, #b45309 50%, #d97706 100%); padding:40px 30px; text-align:center; color:#ffffff;">
+                    <div style="font-size:38px; margin-bottom:10px;">🏆 🌟 🎊</div>
+                    <span style="font-size:13px; font-weight:900; letter-spacing:2.5px; text-transform:uppercase; color:#fef3c7; display:block;">¡NOTIFICACIÓN OFICIAL DE GANADOR!</span>
+                    <h1 style="margin:12px 0 0 0; font-size:30px; font-weight:900; color:#ffffff; text-shadow:0 2px 8px rgba(0,0,0,0.3);">
+                      ¡ERES EL GANADOR DE LA RIFA!
+                    </h1>
+                  </td>
+                </tr>
+
+                <!-- Content -->
+                <tr>
+                  <td style="padding:35px 30px;">
+                    <p style="font-size:18px; line-height:1.5; margin:0 0 16px 0; color:#0f172a;">
+                      Estimado/a <strong>${customerName}</strong>,
+                    </p>
+                    <p style="font-size:15px; line-height:1.6; color:#475569; margin:0 0 25px 0;">
+                      Nos complace informarte oficialmente que tu boleto ha sido el afortunado ganador del sorteo <strong>${raffleName}</strong>, jugado con la <strong>${lotteryName}</strong> en fecha <strong>${drawDate}</strong>.
+                    </p>
+
+                    <!-- Winning Number Showcase Box -->
+                    <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border:3px solid #f59e0b; border-radius:16px; padding:25px; text-align:center; margin-bottom:30px; box-shadow:0 6px 20px rgba(245,158,11,0.2);">
+                      <span style="font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:2px; color:#92400e; display:block; margin-bottom:8px;">
+                        TU NÚMERO GANADOR
+                      </span>
+                      <div style="font-size:38px; font-weight:900; color:#78350f; letter-spacing:4px; font-family:monospace, Courier; margin:8px 0;">
+                        🎟️ #${winningNumber}
+                      </div>
+                      <div style="font-size:18px; font-weight:800; color:#b45309; margin-top:6px;">
+                        Premio: ${prizeName} ${formattedValue ? `(${formattedValue})` : ''}
+                      </div>
+                    </div>
+
+                    <!-- Details Table -->
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; border-radius:12px; padding:20px; font-size:14px; margin-bottom:25px; border:1px solid #e2e8f0;">
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b;">Sorteo / Rifa:</td>
+                        <td align="right" style="padding:8px 0; font-weight:bold; color:#0f172a;">${raffleName}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b;">Lotería Oficial:</td>
+                        <td align="right" style="padding:8px 0; font-weight:bold; color:#0f172a;">${lotteryName}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b;">Fecha del Sorteo:</td>
+                        <td align="right" style="padding:8px 0; font-weight:bold; color:#0f172a;">${drawDate}</td>
+                      </tr>
+                      ${
+                        orderNumber
+                          ? `<tr>
+                        <td style="padding:8px 0; color:#64748b;">Orden de Compra:</td>
+                        <td align="right" style="padding:8px 0; font-weight:bold; color:#0f172a;">${orderNumber}</td>
+                      </tr>`
+                          : ''
+                      }
+                      ${
+                        formattedValue
+                          ? `<tr style="border-top:1px solid #e2e8f0;">
+                        <td style="padding:12px 0 0 0; font-weight:bold; color:#0f172a; font-size:15px;">Valor del Premio:</td>
+                        <td align="right" style="padding:12px 0 0 0; font-weight:bold; color:#059669; font-size:17px;">${formattedValue}</td>
+                      </tr>`
+                          : ''
+                      }
+                    </table>
+
+                    <!-- Claim instructions -->
+                    <div style="background-color:#f0fdf4; border:1px solid #86efac; border-radius:12px; padding:18px; margin-bottom:25px;">
+                      <h4 style="margin:0 0 8px 0; color:#166534; font-size:14px; font-weight:bold;">
+                        📞 ¿Cómo reclamar tu premio?
+                      </h4>
+                      <p style="margin:0; font-size:13px; color:#15803d; line-height:1.5;">
+                        Nuestro equipo de soporte y entrega oficial se pondrá en contacto contigo a través de este correo y vía telefónica para coordinar la verificación y entrega formal de tu premio. Ten a mano tu documento de identidad.
+                      </p>
+                    </div>
+
+                    ${
+                      evidenceUrl
+                        ? `<p style="text-align:center; margin:0 0 15px 0;">
+                      <a href="${evidenceUrl}" target="_blank" style="display:inline-block; padding:10px 20px; background-color:#0f172a; color:#ffffff; text-decoration:none; border-radius:8px; font-weight:bold; font-size:13px;">
+                        Ver Acta Oficial del Sorteo &rarr;
+                      </a>
+                    </p>`
+                        : ''
+                    }
+
+                    <p style="font-size:12px; color:#94a3b8; line-height:1.5; margin:15px 0 0 0; text-align:center;">
+                      Este es un correo oficial generado por la plataforma de Rifas Oficiales Colombia.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color:#f8fafc; padding:20px 30px; text-align:center; border-top:1px solid #e2e8f0; font-size:12px; color:#94a3b8;">
+                    © 2026 Rifas Oficiales Colombia. Todos los derechos reservados.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const response = await resend.emails.send({
+      from: 'Rifas Oficiales <boletos@rshubs.xyz>',
+      to: [to],
+      subject: `🏆 ¡FELICIDADES ${customerName.toUpperCase()}! Eres el Ganador Oficial de ${raffleName} (#${winningNumber})`,
+      html: htmlContent,
+    });
+
+    if (response.error) {
+      console.warn('⚠️ Error devuelto por Resend API al notificar ganador:', response.error.message);
+      return { success: false, error: response.error.message };
+    }
+
+    console.log('✅ Correo de ganador enviado exitosamente vía Resend:', response);
+    return { success: true, response };
+  } catch (err: any) {
+    console.error('Error enviando correo de ganador con Resend:', err);
+    return { success: false, error: err.message };
+  }
+}
+

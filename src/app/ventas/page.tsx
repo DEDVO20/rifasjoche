@@ -263,6 +263,32 @@ export default function VentasPage() {
     }
   };
 
+  // REENVIAR BOLETOS AL CORREO
+  const handleResendEmail = async (orderId: string) => {
+    try {
+      setActionLoadingId(`resend-${orderId}`);
+      toastInfo('Reenviando Boletos', 'Despachando comprobante de boletos al correo con Resend...');
+
+      const res = await fetch(`/api/orders/${orderId}/resend-email`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'No se pudo reenviar el correo.');
+      }
+
+      toastSuccess(
+        '¡Correo Reenviado!',
+        json.message || `Boletos despachados exitosamente al correo ${json.customerEmail || ''}.`
+      );
+    } catch (err: any) {
+      console.error('Error reenviando correo:', err);
+      toastError('Error al Reenviar Correo', err.message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   const totalRevenueSum = sales
     .filter((s) => s.status === 'approved')
     .reduce((acc, s) => acc + s.total, 0);
@@ -543,11 +569,31 @@ export default function VentasPage() {
                   </button>
                 </div>
               ) : sale.status === 'approved' ? (
-                <div className="w-full py-2 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-500/10 border border-emerald-300/80 flex items-center justify-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px] text-emerald-600">
-                    mark_email_read
-                  </span>
-                  Despachado al Correo
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <div className="flex-1 py-2 px-3 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-500/10 border border-emerald-300/80 flex items-center justify-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-emerald-600">
+                      mark_email_read
+                    </span>
+                    Despachado al Correo
+                  </div>
+                  <button
+                    disabled={actionLoadingId === `resend-${sale.id}`}
+                    onClick={() => handleResendEmail(sale.id)}
+                    className="py-2 px-3.5 bg-primary hover:bg-primary-container text-on-primary rounded-xl font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95"
+                    title="Reenviar números por correo"
+                  >
+                    {actionLoadingId === `resend-${sale.id}` ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Reenviando...
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">forward_to_inbox</span>
+                        Reenviar Correo
+                      </>
+                    )}
+                  </button>
                 </div>
               ) : (
                 <div className="w-full py-1.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 text-center">
@@ -687,10 +733,30 @@ export default function VentasPage() {
                           </button>
                         </div>
                       ) : sale.status === 'approved' ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-500/10 border border-emerald-300/80 shadow-sm whitespace-nowrap">
-                          <span className="material-symbols-outlined text-[15px] text-emerald-600">mark_email_read</span>
-                          Despachado al Correo
-                        </span>
+                        <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-500/10 border border-emerald-300/80 shadow-sm whitespace-nowrap">
+                            <span className="material-symbols-outlined text-[15px] text-emerald-600">mark_email_read</span>
+                            Despachado
+                          </span>
+                          <button
+                            disabled={actionLoadingId === `resend-${sale.id}`}
+                            onClick={() => handleResendEmail(sale.id)}
+                            className="px-2.5 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-on-primary border border-primary/20 rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1 disabled:opacity-50 active:scale-95"
+                            title="Reenviar correo oficial con boletos"
+                          >
+                            {actionLoadingId === `resend-${sale.id}` ? (
+                              <>
+                                <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                Reenviando...
+                              </>
+                            ) : (
+                              <>
+                                <span className="material-symbols-outlined text-[15px]">forward_to_inbox</span>
+                                Reenviar
+                              </>
+                            )}
+                          </button>
+                        </div>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 whitespace-nowrap">
                           Boletos Liberados

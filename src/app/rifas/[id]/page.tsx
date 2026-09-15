@@ -31,6 +31,18 @@ interface SaleOrder {
   date: string;
 }
 
+interface WinnerInfo {
+  name: string;
+  email: string;
+  phone: string;
+  number: string;
+  orderNumber?: string;
+  prizeName: string;
+  prizeValue?: number;
+  notifiedAt?: string;
+  isNotified: boolean;
+}
+
 export default function DetalleRifaPage({ params }: { params: { id: string } }) {
   const [activeTab, setActiveTab] = useState<'resumen' | 'numeros' | 'ventas' | 'premios' | 'resultados'>('resumen');
   const [searchNumber, setSearchNumber] = useState('');
@@ -45,10 +57,17 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
   const [ticketNumbers, setTicketNumbers] = useState<TicketNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Formulario Resultados Oficiales
+  // Formulario Resultados Oficiales & Bloqueo
   const [inputWinningNumber, setInputWinningNumber] = useState('');
   const [inputEvidenceUrl, setInputEvidenceUrl] = useState('');
   const [isSavingResult, setIsSavingResult] = useState(false);
+  const [isResultLocked, setIsResultLocked] = useState(false);
+
+  // Estados de Ganador y Notificación
+  const [winnerInfo, setWinnerInfo] = useState<WinnerInfo | null>(null);
+  const [isWinnerNotFound, setIsWinnerNotFound] = useState(false);
+  const [isNotifyingWinner, setIsNotifyingWinner] = useState(false);
+  const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -149,8 +168,86 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         evidenceUrl: raffleData.lottery_draws?.evidence_url || '',
       });
 
-      setInputWinningNumber(raffleData.lottery_draws?.winning_number || '');
+      const currentWinningNumber = raffleData.lottery_draws?.winning_number || '';
+      setInputWinningNumber(currentWinningNumber);
       setInputEvidenceUrl(raffleData.lottery_draws?.evidence_url || '');
+
+      // Validar si ya tiene número ganador para bloquearlo
+      if (currentWinningNumber) {
+        setIsResultLocked(true);
+
+        // Buscar el boleto ganador en raffle_numbers
+        const { data: winTicket } = await supabase
+          .from('raffle_numbers')
+          .select('id, number, status, order_id')
+          .eq('raffle_id', params.id)
+          .eq('number', currentWinningNumber)
+          .maybeSingle();
+
+        if (winTicket && winTicket.status === 'sold' && winTicket.order_id) {
+          const { data: winOrder } = await supabase
+            .from('orders')
+            .select(`
+              id,
+              order_number,
+              profiles (full_name, email, phone),
+              payments (metadata)
+            `)
+            .eq('id', winTicket.order_id)
+            .maybeSingle();
+
+          const { data: auditLog } = await supabase
+            .from('audit_logs')
+            .select('created_at')
+            .eq('entity_type', 'Raffle')
+            .eq('entity_id', params.id)
+            .eq('action', 'GANADOR_NOTIFICADO_POR_CORREO')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const mainPrize =
+            (raffleData.raffle_prizes || []).find((p: any) => p.prize_type === 'main') ||
+            (raffleData.raffle_prizes || [])[0] || {
+              name: 'Premio Mayor',
+              prize_value: 0,
+            };
+
+          const payMeta = (winOrder as any)?.payments?.[0]?.metadata;
+          const name =
+            payMeta?.customer_name ||
+            (winOrder?.profiles as any)?.full_name ||
+            'Comprador Registrado';
+          const email =
+            payMeta?.customer_email ||
+            (winOrder?.profiles as any)?.email ||
+            '';
+          const phone =
+            payMeta?.customer_phone ||
+            (winOrder?.profiles as any)?.phone ||
+            'Sin teléfono';
+
+          setWinnerInfo({
+            name,
+            email,
+            phone,
+            number: currentWinningNumber,
+            orderNumber: winOrder?.order_number,
+            prizeName: mainPrize.name || 'Gran Premio',
+            prizeValue: mainPrize.prize_value ? Number(mainPrize.prize_value) : undefined,
+            notifiedAt: auditLog?.created_at,
+            isNotified: Boolean(auditLog),
+          });
+          setIsWinnerNotFound(false);
+        } else {
+          setWinnerInfo(null);
+          setIsWinnerNotFound(true);
+        }
+      } else {
+        setIsResultLocked(false);
+        setWinnerInfo(null);
+        setIsWinnerNotFound(false);
+      }
 
       // 4. Mapear Premios reales
       const realPrizes: Prize[] = (raffleData.raffle_prizes || []).map((p: any) => ({
@@ -219,7 +316,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
     }
   };
 
-  // Guardar Número Ganador Oficial
+  // Guardar y Bloquear Número Ganador Oficial
   const handleSaveWinningResult = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputWinningNumber || !raffle) return;
@@ -257,11 +354,74 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         status: 'completed',
       });
 
-      alert('Resultado oficial guardado y verificado en Supabase.');
+      setIsResultLocked(true);
+      await loadRaffleDetails();
+      alert('🔒 ¡Resultado oficial guardado y verificado! El número ganador ha quedado bloqueado.');
     } catch (err) {
       console.error('Error guardando resultado:', err);
     } finally {
       setIsSavingResult(false);
+    }
+  };
+
+  // Desbloquear Número Ganador con Confirmación
+  const handleUnlockResult = () => {
+    if (window.confirm('⚠️ ¿Estás seguro de que deseas desbloquear y editar el número ganador oficial?')) {
+      setIsResultLocked(false);
+    }
+  };
+
+  // Notificar / Reenviar Notificación al Ganador Oficial
+  const handleNotifyWinner = async () => {
+    if (!raffle?.id) return;
+    try {
+      setIsNotifyingWinner(true);
+      const res = await fetch(`/api/raffles/${raffle.id}/notify-winner`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        if (json.notSold) {
+          alert(json.message);
+          return;
+        }
+        throw new Error(json.error || 'Error al notificar al ganador');
+      }
+
+      if (json.winner) {
+        setWinnerInfo((prev) => ({
+          ...(prev || json.winner),
+          isNotified: true,
+          notifiedAt: json.winner.notifiedAt || new Date().toISOString(),
+        }));
+      }
+
+      alert(`🎉 ¡Éxito! Notificación oficial enviada al correo ${json.winner?.email || ''}.`);
+    } catch (err: any) {
+      console.error('Error enviando notificación al ganador:', err);
+      alert(err.message || 'Ocurrió un error al enviar la notificación.');
+    } finally {
+      setIsNotifyingWinner(false);
+    }
+  };
+
+  // Reenviar Boletos de una Orden
+  const handleResendOrderEmail = async (orderId: string) => {
+    try {
+      setResendingOrderId(orderId);
+      const res = await fetch(`/api/orders/${orderId}/resend-email`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'No se pudo reenviar el correo.');
+      }
+      alert(json.message || 'Correo reenviado con éxito al cliente.');
+    } catch (err: any) {
+      console.error('Error al reenviar correo de orden:', err);
+      alert(err.message || 'Error al reenviar correo.');
+    } finally {
+      setResendingOrderId(null);
     }
   };
 
@@ -496,7 +656,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
                 <th className="p-4">Cliente</th>
                 <th className="p-4">Boletos Asignados</th>
                 <th className="p-4">Total</th>
-                <th className="p-4">Estado</th>
+                <th className="p-4">Estado & Despacho</th>
                 <th className="p-4">Fecha</th>
               </tr>
             </thead>
@@ -525,9 +685,28 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
                       ${ord.total.toLocaleString('es-CO')} COP
                     </td>
                     <td className="p-4">
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600">
-                        {ord.status === 'approved' ? 'Aprobado' : 'Pendiente'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                            ord.status === 'approved'
+                              ? 'bg-emerald-500/10 text-emerald-600'
+                              : 'bg-amber-500/10 text-amber-600'
+                          }`}
+                        >
+                          {ord.status === 'approved' ? 'Aprobado' : 'Pendiente'}
+                        </span>
+                        {ord.status === 'approved' && (
+                          <button
+                            disabled={resendingOrderId === ord.id}
+                            onClick={() => handleResendOrderEmail(ord.id)}
+                            className="px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-on-primary rounded-lg text-xs font-bold transition-all flex items-center gap-1 border border-primary/20 shadow-sm disabled:opacity-50"
+                            title="Reenviar boletos por correo"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">forward_to_inbox</span>
+                            {resendingOrderId === ord.id ? 'Enviando...' : 'Reenviar'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4 text-xs text-on-surface-variant">{ord.date}</td>
                   </tr>
@@ -581,54 +760,236 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
       {/* 5. PESTAÑA: RESULTADOS Y GANADORES */}
       {activeTab === 'resultados' && (
-        <div className="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/30 space-y-6 max-w-2xl animate-in fade-in-50">
-          <div>
-            <h3 className="font-headline-md text-headline-md font-bold text-primary">
-              Registrar Resultado Oficial del Sorteo
-            </h3>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Ingresa el número ganador oficial expedido por {raffle.lotteryName} para calcular los ganadores automáticamente.
-            </p>
+        <div className="space-y-6 animate-in fade-in-50">
+          {/* A. Tarjeta de Ganador Identificado */}
+          {winnerInfo && (
+            <div className="bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-surface-container-low p-6 sm:p-8 rounded-2xl border-2 border-amber-500/40 shadow-lg space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-amber-500/20 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 text-white flex items-center justify-center text-2xl shadow-md">
+                    🏆
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-black uppercase tracking-widest text-amber-700 block">
+                      ¡GANADOR OFICIAL IDENTIFICADO!
+                    </span>
+                    <h3 className="font-headline-md text-xl sm:text-2xl font-black text-primary">
+                      {winnerInfo.name}
+                    </h3>
+                  </div>
+                </div>
+
+                {/* Badge de Estado de Notificación */}
+                <div>
+                  {winnerInfo.isNotified ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm">
+                      <span className="material-symbols-outlined text-[15px] text-emerald-600">mark_email_read</span>
+                      Notificado por Correo
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-sm">
+                      <span className="material-symbols-outlined text-[15px] text-amber-600">notification_important</span>
+                      Pendiente de Notificación
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Grid de Detalles del Ganador */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/30 space-y-1 shadow-sm">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Boleto Ganador</span>
+                  <div className="font-mono text-2xl font-black text-amber-600 tracking-wider">
+                    #{winnerInfo.number}
+                  </div>
+                  {winnerInfo.orderNumber && (
+                    <div className="text-xs text-on-surface-variant">Orden: <strong>{winnerInfo.orderNumber}</strong></div>
+                  )}
+                </div>
+
+                <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/30 space-y-1 shadow-sm">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Premio Correspondiente</span>
+                  <div className="font-bold text-primary text-base">
+                    {winnerInfo.prizeName}
+                  </div>
+                  {winnerInfo.prizeValue && (
+                    <div className="text-sm font-extrabold text-emerald-600">
+                      ${winnerInfo.prizeValue.toLocaleString('es-CO')} COP
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/30 space-y-1 shadow-sm sm:col-span-2 lg:col-span-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Contacto del Ganador</span>
+                  <div className="text-xs font-semibold text-primary truncate">{winnerInfo.email}</div>
+                  <a
+                    href={`https://wa.me/57${winnerInfo.phone.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:underline pt-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">chat</span>
+                    WhatsApp: {winnerInfo.phone}
+                  </a>
+                </div>
+              </div>
+
+              {/* Botones de Acción de Notificación & Reenvío */}
+              <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-amber-500/20">
+                <button
+                  type="button"
+                  disabled={isNotifyingWinner}
+                  onClick={handleNotifyWinner}
+                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600 text-white rounded-xl font-extrabold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
+                >
+                  {isNotifyingWinner ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Enviando Notificación...
+                    </>
+                  ) : winnerInfo.isNotified ? (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">forward_to_inbox</span>
+                      Reenviar Notificación al Ganador
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">campaign</span>
+                      🎉 Notificar al Ganador por Correo
+                    </>
+                  )}
+                </button>
+
+                {winnerInfo.notifiedAt && (
+                  <span className="text-xs text-on-surface-variant">
+                    Último envío: {new Date(winnerInfo.notifiedAt).toLocaleString('es-CO')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* B. Caso: Número Ganador Registrado pero no vendido */}
+          {isWinnerNotFound && (raffle.winningNumber || inputWinningNumber) && (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-5 rounded-2xl text-amber-900 space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-sm">
+                <span className="material-symbols-outlined text-[18px] text-amber-600">info</span>
+                El boleto #{raffle.winningNumber || inputWinningNumber} no fue comprado
+              </div>
+              <p className="text-xs text-amber-800">
+                Ningún participante adquirió este número oficial en este sorteo.
+              </p>
+            </div>
+          )}
+
+          {/* C. Formulario de Registro y Bloqueo */}
+          <div className="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/30 space-y-6 max-w-2xl">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-outline-variant/20 pb-4">
+              <div>
+                <h3 className="font-headline-md text-headline-md font-bold text-primary flex items-center gap-2">
+                  <span>Resultado Oficial del Sorteo</span>
+                  {isResultLocked && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      🔒 Bloqueado
+                    </span>
+                  )}
+                </h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                  Número ganador expedido por {raffle.lotteryName} ({raffle.drawDate}).
+                </p>
+              </div>
+
+              {isResultLocked && (
+                <button
+                  type="button"
+                  onClick={handleUnlockResult}
+                  className="px-3 py-1.5 bg-surface-container hover:bg-surface-container-high text-primary rounded-xl text-xs font-bold border border-outline-variant flex items-center gap-1 transition-all"
+                  title="Desbloquear para corregir número ganador"
+                >
+                  <span className="material-symbols-outlined text-[15px]">lock_open</span>
+                  Desbloquear
+                </button>
+              )}
+            </div>
+
+            {isResultLocked && (
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3.5 flex items-center gap-3">
+                <span className="text-2xl">🔒</span>
+                <div className="text-xs text-emerald-900">
+                  <strong>Número Ganador Protegido:</strong> Este sorteo ya tiene registrado y verificado el número ganador oficial. Los campos están bloqueados para evitar cambios accidentales.
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveWinningResult} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-primary mb-1">
+                  Número Ganador Oficial *
+                </label>
+                <input
+                  type="text"
+                  required
+                  disabled={isResultLocked}
+                  placeholder="Ej. 5832"
+                  value={inputWinningNumber}
+                  onChange={(e) => setInputWinningNumber(e.target.value)}
+                  className={`w-full px-4 py-2.5 border rounded-xl font-raffle-number text-xl font-bold transition-all ${
+                    isResultLocked
+                      ? 'bg-surface-container-low/80 text-primary/70 border-outline-variant/40 cursor-not-allowed'
+                      : 'bg-surface-container-lowest border-outline-variant focus:ring-2 focus:ring-primary'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-primary mb-1">
+                  URL de Evidencia / Acta Oficial de Lotería
+                </label>
+                <input
+                  type="url"
+                  disabled={isResultLocked}
+                  placeholder="https://loteriademedellin.com.co/resultados"
+                  value={inputEvidenceUrl}
+                  onChange={(e) => setInputEvidenceUrl(e.target.value)}
+                  className={`w-full px-4 py-2 border rounded-xl text-sm transition-all ${
+                    isResultLocked
+                      ? 'bg-surface-container-low/80 text-primary/70 border-outline-variant/40 cursor-not-allowed'
+                      : 'bg-surface-container-lowest border-outline-variant focus:ring-2 focus:ring-primary'
+                  }`}
+                />
+              </div>
+
+              {!isResultLocked ? (
+                <button
+                  type="submit"
+                  disabled={isSavingResult}
+                  className="px-6 py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary-container shadow-md disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSavingResult ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">verified</span>
+                      Guardar y Bloquear Número Ganador
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div className="pt-1">
+                  <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-100 border border-emerald-300">
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">lock</span>
+                    Número Ganador Guardado y Bloqueado
+                  </span>
+                </div>
+              )}
+            </form>
           </div>
-
-          <form onSubmit={handleSaveWinningResult} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-primary mb-1">
-                Número Ganador Oficial *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ej. 5832"
-                value={inputWinningNumber}
-                onChange={(e) => setInputWinningNumber(e.target.value)}
-                className="w-full px-4 py-2.5 border border-outline-variant rounded-xl font-raffle-number text-xl font-bold bg-surface-container-lowest"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-primary mb-1">
-                URL de Evidencia / Acta Oficial de Lotería
-              </label>
-              <input
-                type="url"
-                placeholder="https://loteriademedellin.com.co/resultados"
-                value={inputEvidenceUrl}
-                onChange={(e) => setInputEvidenceUrl(e.target.value)}
-                className="w-full px-4 py-2 border border-outline-variant rounded-xl text-sm bg-surface-container-lowest"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSavingResult}
-              className="px-6 py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary-container shadow-md disabled:opacity-50"
-            >
-              {isSavingResult ? 'Guardando...' : 'Guardar y Verificar Ganadores'}
-            </button>
-          </form>
         </div>
       )}
     </div>
   );
 }
+
