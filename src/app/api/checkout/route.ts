@@ -41,6 +41,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Validar estado de la rifa
+    if (raffle.status !== 'active') {
+      return NextResponse.json(
+        { error: 'Este sorteo no se encuentra disponible para la venta de boletos.' },
+        { status: 400 }
+      );
+    }
+
+    // Validar si la fecha del sorteo ya pasó
+    if (raffle.end_at && new Date(raffle.end_at).getTime() <= Date.now()) {
+      return NextResponse.json(
+        { error: 'No es posible comprar boletos: la fecha de este sorteo ya ha transcurrido y las ventas están oficialmente cerradas.' },
+        { status: 400 }
+      );
+    }
+
     const pricePerTicket = Number(raffle.price_per_number) || 10000;
     const totalAmount = quantity * pricePerTicket;
 

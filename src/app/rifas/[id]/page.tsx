@@ -243,6 +243,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
               year: 'numeric',
             })
           : 'Fecha por definir',
+        rawEndAt: raffleData.end_at,
         pricePerNumber: Number(raffleData.price_per_number) || 10000,
         totalNumbers: totalNums,
         soldCount: actualSoldCount,
@@ -612,6 +613,12 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
             >
               ● {raffle.status === 'active' ? 'Activa' : raffle.status === 'paused' ? 'Pausada' : raffle.status === 'completed' ? 'Finalizada' : 'Cancelada'}
             </span>
+            {raffle.rawEndAt && new Date(raffle.rawEndAt).getTime() <= Date.now() && raffle.status !== 'completed' && (
+              <span className="px-3 py-1 rounded-full font-label-caps text-xs font-bold uppercase border bg-amber-500/10 text-amber-800 border-amber-500/30 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[14px]">event_busy</span>
+                Fecha de Sorteo Vencida ({raffle.drawDate})
+              </span>
+            )}
           </div>
           <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
             Código: <strong>{raffle.code}</strong> • Sortea con {raffle.lotteryName} ({raffle.drawDate})

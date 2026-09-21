@@ -449,6 +449,12 @@ export default function GestorRifasPage() {
                           ? 'Pausada'
                           : 'Finalizada'}
                       </span>
+                      {raffle.endDate && new Date(raffle.endDate + 'T23:59:59').getTime() <= Date.now() && !hasWinner && (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-sm flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px]">event_busy</span>
+                          Fecha Vencida
+                        </span>
+                      )}
                       {raffle.winningNumber && (
                         <span className="px-2.5 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-sm flex items-center gap-1">
                           <span className="material-symbols-outlined text-[14px] text-amber-700">emoji_events</span>

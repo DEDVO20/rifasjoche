@@ -36,6 +36,7 @@ interface PublicRaffleDetail {
   prizes: PublicPrize[];
   instantPrizes: PublicInstantPrize[];
   status?: string;
+  rawEndAt?: string;
   winningNumber?: string;
   evidenceUrl?: string;
 }
@@ -151,6 +152,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             : 'Próximamente',
           description: data.description || 'Participa y gana fabulosos premios con este sorteo verificado.',
           status: data.status || 'active',
+          rawEndAt: data.end_at,
           winningNumber: (data.status === 'completed' && data.lottery_draws?.winning_number) ? data.lottery_draws.winning_number : undefined,
           evidenceUrl: data.status === 'completed' ? (data.lottery_draws?.evidence_url || undefined) : undefined,
           prizes: formattedPrizes.length > 0 ? formattedPrizes : [
@@ -192,12 +194,13 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
     }
   }, [profile, user]);
 
+  const isPastDrawDate = Boolean(raffle?.rawEndAt && new Date(raffle.rawEndAt).getTime() <= Date.now());
   const pricePerTicket = raffle?.pricePerTicket || 10000;
   const availableTickets = raffle?.availableTickets ?? 1000;
   const maxAllowedTickets = Math.min(raffle?.maxOrder || availableTickets, availableTickets);
   const minNumbersPerOrder = availableTickets > 0 ? Math.min(raffle?.minOrder || 1, availableTickets) : 0;
   const totalAmount = ticketQuantity * pricePerTicket;
-  const isMinMet = ticketQuantity >= minNumbersPerOrder && ticketQuantity <= maxAllowedTickets && ticketQuantity > 0;
+  const isMinMet = ticketQuantity >= minNumbersPerOrder && ticketQuantity <= maxAllowedTickets && ticketQuantity > 0 && !isPastDrawDate;
 
   const handleQuantityChange = (newQty: number) => {
     if (availableTickets <= 0) {
@@ -361,6 +364,11 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
               {raffle?.winningNumber ? (
                 <span className="px-3 py-1 bg-amber-100 text-amber-950 border border-amber-300 rounded-full text-xs font-bold">
                   Sorteo Finalizado
+                </span>
+              ) : isPastDrawDate ? (
+                <span className="px-3 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-full text-xs font-bold flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[14px]">event_busy</span>
+                  Ventas Cerradas por Fecha
                 </span>
               ) : availableTickets <= 0 ? (
                 <span className="px-3 py-1 bg-rose-500/10 text-rose-700 border border-rose-300 rounded-full text-xs font-black uppercase">
@@ -528,6 +536,27 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
                   </Link>
                 </div>
               </div>
+            ) : isPastDrawDate ? (
+              <div className="p-8 bg-amber-50 border border-amber-300 rounded-2xl text-center space-y-3">
+                <div className="w-14 h-14 bg-amber-500 text-white rounded-2xl flex items-center justify-center mx-auto shadow-md">
+                  <span className="material-symbols-outlined text-[32px]">event_busy</span>
+                </div>
+                <h4 className="font-headline-md text-xl font-black text-amber-950">
+                  Ventas Cerradas: La Fecha del Sorteo Ya Transcurrió
+                </h4>
+                <p className="text-xs sm:text-sm text-amber-800 max-w-md mx-auto">
+                  Este sorteo estaba programado para el <strong>{raffle?.drawDate}</strong>. Por normativa oficial, no se permite la compra de boletos después de la fecha del sorteo.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    href="/mis-boletos"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-amber-950 text-white font-bold text-xs rounded-xl shadow hover:bg-black transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">search</span>
+                    Consultar Mis Boletos Comprados
+                  </Link>
+                </div>
+              </div>
             ) : availableTickets <= 0 ? (
               <div className="p-6 bg-rose-50 border border-rose-300 rounded-2xl text-center space-y-2">
                 <span className="material-symbols-outlined text-4xl text-rose-600">block</span>
@@ -690,15 +719,21 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             </div>
 
             <button
-              disabled={!isMinMet || availableTickets <= 0}
+              disabled={!isMinMet || availableTickets <= 0 || isPastDrawDate || Boolean(raffle?.winningNumber)}
               onClick={() => {
                 setCheckoutStep(1);
                 setIsCheckoutOpen(true);
               }}
               className="w-full py-4 bg-primary text-on-primary rounded-xl font-body-md text-body-md font-extrabold shadow-lg hover:bg-primary-container disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
             >
-              <span className="material-symbols-outlined">payments</span>
-              {availableTickets <= 0
+              <span className="material-symbols-outlined">
+                {isPastDrawDate ? 'event_busy' : 'payments'}
+              </span>
+              {raffle?.winningNumber
+                ? 'Sorteo Finalizado'
+                : isPastDrawDate
+                ? 'Ventas Cerradas por Fecha'
+                : availableTickets <= 0
                 ? 'Sorteo Agotado'
                 : `Comprar y Transferir ($${totalAmount.toLocaleString('es-CO')})`}
             </button>

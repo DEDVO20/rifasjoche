@@ -24,6 +24,7 @@ interface PublicRaffle {
   drawDate: string;
   prizeDescription: string;
   status: string;
+  rawEndAt?: string;
   winningNumber?: string;
   evidenceUrl?: string;
   instantPrizes: InstantPrize[];
@@ -96,6 +97,7 @@ export default function HomePage() {
               : 'Próximamente',
             prizeDescription: item.description || 'Participa y gana fabulosos premios con el sorteo oficial.',
             status: item.status || 'active',
+            rawEndAt: item.end_at,
             winningNumber: winningNum,
             evidenceUrl: item.lottery_draws?.evidence_url || undefined,
             instantPrizes,
@@ -250,6 +252,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {publicRaffles.map((raffle) => {
               const hasWinner = raffle.status === 'completed' && Boolean(raffle.winningNumber);
+              const isPastDrawDate = Boolean(raffle.rawEndAt && new Date(raffle.rawEndAt).getTime() <= Date.now());
 
               return (
                 <div
@@ -279,6 +282,11 @@ export default function HomePage() {
                           <span className="bg-gradient-to-r from-amber-500 to-amber-600 text-white px-3 py-1 rounded-full font-label-caps text-xs font-black shadow-lg flex items-center gap-1 border border-amber-300">
                             <span className="material-symbols-outlined text-[14px]">emoji_events</span>
                             Ganador: #{raffle.winningNumber}
+                          </span>
+                        ) : isPastDrawDate ? (
+                          <span className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1 rounded-lg font-headline-md text-xs font-bold shadow-md flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[13px]">event_busy</span>
+                            Ventas Cerradas
                           </span>
                         ) : (
                           <span className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-lg font-headline-md text-sm font-bold shadow-md">
@@ -353,6 +361,16 @@ export default function HomePage() {
                             #{raffle.winningNumber}
                           </div>
                         </div>
+                      ) : isPastDrawDate ? (
+                        <div className="bg-amber-50/80 border border-amber-300 p-3.5 rounded-2xl flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-amber-700 text-[20px]">event_busy</span>
+                            <div>
+                              <span className="text-[10px] uppercase font-bold text-amber-900 block">Sorteo Cerrado</span>
+                              <strong className="text-xs text-amber-950 font-bold">Fecha del sorteo cumplida ({raffle.drawDate})</strong>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
                         <div className="space-y-1.5 pt-2">
                           <div className="flex justify-between font-body-sm text-xs">
@@ -384,6 +402,14 @@ export default function HomePage() {
                       >
                         <span className="material-symbols-outlined">search</span>
                         Consultar Boletos Ganadores
+                      </Link>
+                    ) : isPastDrawDate ? (
+                      <Link
+                        href={`/tienda/${raffle.slug}`}
+                        className="w-full bg-surface-container-high text-on-surface-variant py-3.5 rounded-xl text-center font-body-md text-body-md font-bold flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-colors shadow-sm"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">lock</span>
+                        Ventas Cerradas por Fecha
                       </Link>
                     ) : (
                       <Link
