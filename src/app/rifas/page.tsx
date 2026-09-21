@@ -41,7 +41,13 @@ export default function GestorRifasPage() {
     min_order: 1,
     end_date: '',
     lottery_id: '1',
+    image_url: '',
   });
+
+  // Estado de archivo y vista previa de imagen
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Dynamic prizes state
   const [prizes, setPrizes] = useState<RafflePrize[]>([
@@ -215,12 +221,59 @@ export default function GestorRifasPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 10 * 1024 * 1024) {
+        toastError('Imagen muy pesada', 'La imagen no debe superar los 10 MB.');
+        return;
+      }
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+      toastInfo('Imagen Seleccionada', `${file.name} lista para el sorteo.`);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setFormData((prev) => ({ ...prev, image_url: '' }));
+  };
+
   // Guardar Rifa en Supabase
   const handleCreateRaffle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name) return;
 
     try {
+      setIsUploadingImage(true);
+      let finalImageUrl = formData.image_url.trim();
+
+      // Subir archivo de imagen si fue seleccionado
+      if (imageFile) {
+        try {
+          const uploadData = new FormData();
+          uploadData.append('file', imageFile);
+
+          const uploadRes = await fetch('/api/upload-raffle-image', {
+            method: 'POST',
+            body: uploadData,
+          });
+          const uploadJson = await uploadRes.json();
+
+          if (uploadRes.ok && uploadJson.publicUrl) {
+            finalImageUrl = uploadJson.publicUrl;
+          } else {
+            console.warn('Error en upload-raffle-image:', uploadJson.error);
+          }
+        } catch (uploadErr) {
+          console.warn('Fallo al subir imagen:', uploadErr);
+        }
+      }
+
+      if (!finalImageUrl) {
+        finalImageUrl = 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80';
+      }
       const slugStr = formData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now().toString().slice(-4);
 
       const selectedLotteryId = parseInt(formData.lottery_id, 10) || 1;
@@ -278,7 +331,7 @@ export default function GestorRifasPage() {
           start_at: startDate.toISOString(),
           end_at: endDate.toISOString(),
           status: 'active',
-          image_url: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80',
+          image_url: finalImageUrl,
         })
         .select()
         .single();
@@ -320,7 +373,9 @@ export default function GestorRifasPage() {
       }
 
       setIsModalOpen(false);
-      setFormData({ name: '', price: 10000, total_numbers: 1000, min_order: 1, end_date: '', lottery_id: lotteriesList[0]?.id || '1' });
+      setFormData({ name: '', price: 10000, total_numbers: 1000, min_order: 1, end_date: '', lottery_id: lotteriesList[0]?.id || '1', image_url: '' });
+      setImageFile(null);
+      setImagePreview(null);
       setPrizes([
         {
           name: '',
@@ -336,6 +391,8 @@ export default function GestorRifasPage() {
     } catch (err: any) {
       console.error('Excepción al crear rifa:', err);
       toastError('Error Inesperado', err.message);
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -644,6 +701,88 @@ export default function GestorRifasPage() {
                       value={formData.end_date}
                       onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
                       className="w-full px-4 py-2 border border-outline-variant rounded-lg bg-surface-container-lowest focus:ring-2 focus:ring-primary font-body-md text-body-md"
+                    />
+                  </div>
+                </div>
+
+                {/* Carga de Imagen de la Rifa */}
+                <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/30 space-y-3">
+                  <label className="block text-xs font-bold text-primary flex items-center justify-between">
+                    <span>Imagen de la Rifa (Portada Oficial)</span>
+                    <span className="text-[11px] font-normal text-on-surface-variant">PNG, JPG, WEBP</span>
+                  </label>
+
+                  {/* Vista Previa */}
+                  {imagePreview || formData.image_url ? (
+                    <div className="relative rounded-xl overflow-hidden border border-outline-variant/40 bg-surface-container-high h-48 group">
+                      <img
+                        src={imagePreview || formData.image_url}
+                        alt="Vista previa de la rifa"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <label className="px-3 py-1.5 bg-white text-slate-900 hover:bg-slate-100 rounded-lg text-xs font-bold shadow cursor-pointer flex items-center gap-1 transition-transform hover:scale-105">
+                          <span className="material-symbols-outlined text-[16px]">photo_camera</span>
+                          Cambiar Foto
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageChange}
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleRemoveImage}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow flex items-center gap-1 transition-transform hover:scale-105"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                          Quitar
+                        </button>
+                      </div>
+                      <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[11px] px-2.5 py-0.5 rounded-md backdrop-blur-sm font-medium">
+                        {imageFile ? `Archivo: ${imageFile.name}` : 'Imagen web seleccionada'}
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed border-outline-variant/60 hover:border-primary rounded-xl p-6 flex flex-col items-center justify-center gap-2 bg-surface-container-low/40 hover:bg-surface-container-low transition-colors cursor-pointer group">
+                      <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                        <span className="material-symbols-outlined text-[26px]">add_photo_alternate</span>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs font-bold text-primary">
+                          Haz clic o arrastra una imagen para el sorteo
+                        </p>
+                        <p className="text-[11px] text-on-surface-variant mt-0.5">
+                          Dimensiones recomendadas: 800x600 px (Máx. 10 MB)
+                        </p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+
+                  {/* Campo opcional de URL directa */}
+                  <div>
+                    <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
+                      O ingresa la URL de una imagen en internet:
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://ejemplo.com/foto-del-premio.jpg"
+                      value={formData.image_url}
+                      onChange={(e) => {
+                        setFormData({ ...formData, image_url: e.target.value });
+                        if (e.target.value) {
+                          setImageFile(null);
+                          setImagePreview(null);
+                        }
+                      }}
+                      className="w-full px-3 py-1.5 text-xs border border-outline-variant rounded-lg bg-surface-container-lowest focus:ring-2 focus:ring-primary"
                     />
                   </div>
                 </div>

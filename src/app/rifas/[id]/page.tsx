@@ -244,6 +244,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
             })
           : 'Fecha por definir',
         rawEndAt: raffleData.end_at,
+        imageUrl: raffleData.image_url || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80',
         pricePerNumber: Number(raffleData.price_per_number) || 10000,
         totalNumbers: totalNums,
         soldCount: actualSoldCount,
@@ -568,6 +569,48 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
     }
   };
 
+  const [isUpdatingImage, setIsUpdatingImage] = useState(false);
+
+  // Cambiar imagen de portada de la rifa
+  const handleChangeCoverImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0] || !raffle?.id) return;
+    const file = e.target.files[0];
+    if (file.size > 10 * 1024 * 1024) {
+      alert('La imagen no debe superar los 10 MB.');
+      return;
+    }
+
+    try {
+      setIsUpdatingImage(true);
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+
+      const res = await fetch('/api/upload-raffle-image', {
+        method: 'POST',
+        body: uploadData,
+      });
+      const json = await res.json();
+
+      if (!res.ok || !json.publicUrl) {
+        throw new Error(json.error || 'Error al subir la imagen');
+      }
+
+      const newImageUrl = json.publicUrl;
+      await supabase
+        .from('raffles')
+        .update({ image_url: newImageUrl })
+        .eq('id', raffle.id);
+
+      setRaffle((prev: any) => ({ ...prev, imageUrl: newImageUrl }));
+      alert('¡Imagen de la rifa actualizada con éxito!');
+    } catch (err: any) {
+      console.error('Error actualizando imagen:', err);
+      alert(err.message || 'Error al actualizar la imagen');
+    } finally {
+      setIsUpdatingImage(false);
+    }
+  };
+
   if (isLoading || !raffle) {
     return (
       <div className="space-y-6 py-12 text-center text-primary font-bold text-lg">
@@ -686,6 +729,35 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
       {/* 1. PESTAÑA: RESUMEN */}
       {activeTab === 'resumen' && (
         <div className="space-y-6 animate-in fade-in-50">
+          {/* Banner de Portada de la Rifa */}
+          <div className="relative rounded-2xl overflow-hidden h-48 md:h-64 border border-outline-variant/30 shadow-md bg-surface-container-high group">
+            <img
+              src={raffle.imageUrl}
+              alt={raffle.name}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent flex items-end justify-between p-6">
+              <div>
+                <span className="text-xs uppercase font-black text-amber-300 tracking-wider block">
+                  Imagen Oficial de Portada
+                </span>
+                <h3 className="text-white font-bold text-lg md:text-xl drop-shadow-md">
+                  {raffle.name}
+                </h3>
+              </div>
+              <label className="px-4 py-2 bg-white/95 hover:bg-white text-slate-900 font-bold text-xs rounded-xl shadow-lg cursor-pointer flex items-center gap-1.5 transition-all hover:scale-105">
+                <span className="material-symbols-outlined text-[18px]">photo_camera</span>
+                {isUpdatingImage ? 'Subiendo...' : 'Cambiar Imagen'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={isUpdatingImage}
+                  onChange={handleChangeCoverImage}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-base md:gap-gutter">
             <div className="bg-surface-container-lowest p-6 rounded-xl shadow-[0px_4px_20px_rgba(15,23,42,0.05)] border border-outline-variant/20">
               <span className="font-label-caps text-label-caps text-outline uppercase">RECAUDACIÓN TOTAL</span>
