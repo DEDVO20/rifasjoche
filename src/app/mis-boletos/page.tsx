@@ -3,6 +3,18 @@
 import { useState } from 'react';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 
+interface InstantPrize {
+  number: string;
+  prizeName: string;
+  prizeValue?: number;
+}
+
+interface WinningTicketDetail {
+  prizeName: string;
+  prizeValue?: number;
+  isMainPrize: boolean;
+}
+
 interface TicketLookupResult {
   id: number;
   orderNumber: string;
@@ -17,6 +29,9 @@ interface TicketLookupResult {
   totalPaid: number;
   status: 'confirmed' | 'pending' | 'rejected' | string;
   createdAt: string;
+  officialWinningNumber?: string;
+  instantPrizes?: InstantPrize[];
+  winningTickets?: { [num: string]: WinningTicketDetail };
 }
 
 export default function MisBoletosPage() {
@@ -164,11 +179,47 @@ export default function MisBoletosPage() {
                   const isPending = res.status === 'pending';
                   const isRejected = res.status === 'rejected';
 
+                  // Verificar si tiene boletos premiados
+                  const winningTicketsMap = res.winningTickets || {};
+                  const userWinningTickets = Object.keys(winningTicketsMap);
+                  const hasWinnerTicket = userWinningTickets.length > 0;
+
                   return (
                     <div
                       key={res.id}
-                      className="bg-surface-container-lowest p-6 sm:p-8 rounded-2xl shadow-lg border border-outline-variant/30 space-y-5"
+                      className={`bg-surface-container-lowest p-6 sm:p-8 rounded-2xl shadow-lg border space-y-5 transition-all ${
+                        hasWinnerTicket
+                          ? 'border-amber-400 ring-2 ring-amber-300 shadow-amber-500/10'
+                          : 'border-outline-variant/30'
+                      }`}
                     >
+                      {/* Banner de Felicitación si tiene boleto premiado */}
+                      {hasWinnerTicket && (
+                        <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-amber-950 p-4 rounded-xl shadow-md border border-amber-300 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-amber-800 shadow shrink-0">
+                              <span className="material-symbols-outlined text-[24px]">emoji_events</span>
+                            </div>
+                            <div>
+                              <strong className="block text-xs uppercase font-black tracking-wider text-amber-900">
+                                🎉 ¡FELICITACIONES! TIENES UN BOLETO GANADOR
+                              </strong>
+                              <p className="text-xs sm:text-sm font-extrabold text-amber-950">
+                                {userWinningTickets.map((num) => {
+                                  const win = winningTicketsMap[num];
+                                  return (
+                                    <span key={num} className="mr-2">
+                                      Boleto #{num}: <u>{win.prizeName}</u>
+                                      {win.prizeValue ? ` ($${win.prizeValue.toLocaleString('es-CO')} COP)` : ''}
+                                    </span>
+                                  );
+                                })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Cabecera de la Orden */}
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-outline-variant/20 pb-4">
                         <div>
@@ -235,6 +286,37 @@ export default function MisBoletosPage() {
                         </div>
                       </div>
 
+                      {/* Números Premiados Configurados en la Rifa */}
+                      {res.instantPrizes && res.instantPrizes.length > 0 && (
+                        <div className="bg-amber-500/10 border border-amber-300/60 p-3.5 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                            <span className="flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[16px] text-amber-600">stars</span>
+                              🎯 Números Premiados Configurados en este Sorteo ({res.instantPrizes.length}):
+                            </span>
+                            <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded bg-amber-200 text-amber-950">
+                              Premios Directos
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {res.instantPrizes.map((ip, idx) => (
+                              <div
+                                key={idx}
+                                className="px-2.5 py-1 bg-white text-amber-950 rounded-lg text-xs font-bold border border-amber-300 shadow-sm flex items-center gap-1.5"
+                              >
+                                <span className="font-mono font-black text-amber-700">#{ip.number}</span>
+                                <span>- {ip.prizeName}</span>
+                                {ip.prizeValue ? (
+                                  <span className="text-emerald-700 text-[11px] font-extrabold">
+                                    (${ip.prizeValue.toLocaleString('es-CO')})
+                                  </span>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Boletos */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
@@ -251,22 +333,35 @@ export default function MisBoletosPage() {
                           <div className="flex flex-wrap gap-2.5">
                             {res.numbers.map((num) => {
                               const isMatched = isMatchedTicket(num);
+                              const winDetail = winningTicketsMap[num];
+
                               return (
-                                <span
+                                <div
                                   key={num}
                                   className={`px-4 py-2 rounded-xl font-raffle-number text-lg font-black shadow-sm flex items-center gap-1.5 transition-all ${
-                                    isMatched
+                                    winDetail
+                                      ? 'bg-amber-400 text-amber-950 border-2 border-amber-600 scale-110 shadow-lg ring-4 ring-amber-300 animate-pulse'
+                                      : isMatched
                                       ? 'bg-amber-300 text-amber-950 border-2 border-amber-500 scale-105 shadow-md ring-2 ring-amber-400'
                                       : 'bg-secondary-container text-on-secondary-container border border-secondary-fixed-dim'
                                   }`}
                                 >
-                                  {isMatched && (
+                                  {winDetail ? (
+                                    <span className="material-symbols-outlined text-[20px] text-amber-950">
+                                      emoji_events
+                                    </span>
+                                  ) : isMatched ? (
                                     <span className="material-symbols-outlined text-[18px] text-amber-700">
                                       star
                                     </span>
-                                  )}
+                                  ) : null}
                                   #{num}
-                                </span>
+                                  {winDetail && (
+                                    <span className="text-[10px] font-sans font-extrabold bg-white/90 text-amber-900 px-1.5 py-0.5 rounded shadow-sm">
+                                      ¡Ganador!
+                                    </span>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>

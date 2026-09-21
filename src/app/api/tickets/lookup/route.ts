@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ tickets: [] });
     }
 
-    // 5. Cargar órdenes completas con datos de rifas y perfiles
+    // 5. Cargar órdenes completas con datos de rifas, premios y perfiles
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
       .select(`
@@ -170,7 +170,13 @@ export async function POST(req: NextRequest) {
         created_at,
         profiles (full_name, email, phone, document_number),
         payments (provider, metadata, status),
-        raffles (id, name, end_at, lottery_draws (lotteries (name)))
+        raffles (
+          id,
+          name,
+          end_at,
+          lottery_draws (winning_number, lotteries (name)),
+          raffle_prizes (*)
+        )
       `)
       .in('id', finalOrderIds)
       .order('id', { ascending: false });
@@ -194,7 +200,7 @@ export async function POST(req: NextRequest) {
       ticketsByOrder.set(row.order_id, current);
     });
 
-    // 7. Formatear y construir resultado con PROTECCIÓN DE DATOS (Enmascaramiento)
+    // 7. Formatear y construir resultado con detección de Números Premiados
     const formattedResults = ordersData.map((order: any) => {
       const numbers = ticketsByOrder.get(order.id) || [];
       const payment = Array.isArray(order.payments) ? order.payments[0] : order.payments;
@@ -214,6 +220,43 @@ export async function POST(req: NextRequest) {
       const raffleName = raffle.name || 'Sorteo Oficial';
       const lotteryName =
         raffle.lottery_draws?.lotteries?.name || 'Lotería Oficial';
+      const officialWinningNumber = raffle.lottery_draws?.winning_number || '';
+      const prizes = raffle.raffle_prizes || [];
+
+      // Mapear números premiados / premios directos
+      const instantPrizes = prizes
+        .filter((p: any) => p.rule_type === 'specific_number')
+        .map((p: any) => ({
+          number: p.rule_value || '',
+          prizeName: p.name || 'Premio Anticipado',
+          prizeValue: Number(p.prize_value) || 0,
+        }));
+
+      // Identificar si alguno de los boletos del usuario es ganador
+      const winningTickets: { [ticketNum: string]: { prizeName: string; prizeValue?: number; isMainPrize: boolean } } = {};
+
+      numbers.forEach((numStr) => {
+        // A. Coincidencia con número ganador de lotería (Premio Mayor)
+        if (officialWinningNumber && (numStr === officialWinningNumber || parseInt(numStr, 10) === parseInt(officialWinningNumber, 10))) {
+          const mainPrize = prizes.find((p: any) => p.prize_type === 'main') || prizes[0];
+          winningTickets[numStr] = {
+            prizeName: mainPrize?.name || 'Premio Mayor',
+            prizeValue: mainPrize?.prize_value ? Number(mainPrize.prize_value) : undefined,
+            isMainPrize: true,
+          };
+        }
+
+        // B. Coincidencia con Número Premiado Directo / Anticipado
+        const instantMatch = instantPrizes.find((ip: any) => ip.number === numStr || parseInt(ip.number, 10) === parseInt(numStr, 10));
+        if (instantMatch) {
+          winningTickets[numStr] = {
+            prizeName: instantMatch.prizeName,
+            prizeValue: instantMatch.prizeValue,
+            isMainPrize: false,
+          };
+        }
+      });
+
       const drawDate = raffle.end_at
         ? new Date(raffle.end_at).toLocaleDateString('es-CO', {
             day: 'numeric',
@@ -242,6 +285,9 @@ export async function POST(req: NextRequest) {
         numbers,
         totalPaid: Number(order.total) || 0,
         status,
+        officialWinningNumber,
+        instantPrizes,
+        winningTickets,
         createdAt: order.created_at,
       };
     });

@@ -17,6 +17,8 @@ interface Prize {
   type: 'main' | 'secondary';
   value: number;
   rule: string;
+  ruleType?: string;
+  ruleValue?: string;
   winningNumber?: string;
 }
 
@@ -316,10 +318,14 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         name: p.name || 'Premio',
         type: p.prize_type === 'main' ? 'main' : 'secondary',
         value: Number(p.prize_value) || 0,
+        ruleType: p.rule_type,
+        ruleValue: p.rule_value,
         rule: p.rule_type === 'exact_match'
           ? `Coincidencia exacta con ${raffleData.lottery_draws?.lotteries?.name || 'Lotería Oficial'}`
+          : p.rule_type === 'specific_number'
+          ? `🎯 Número Premiado: #${p.rule_value || '0000'} (Premio Anticipado / Directo)`
           : `Regla especial ${p.rule_type}`,
-        winningNumber: p.winning_number || undefined,
+        winningNumber: p.rule_type === 'specific_number' ? p.rule_value : (p.winning_number || undefined),
       }));
 
       setPrizes(realPrizes);
@@ -812,36 +818,89 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
       {/* 4. PESTAÑA: PREMIOS CONFIGURADOS */}
       {activeTab === 'premios' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in-50">
-          {prizes.length > 0 ? (
-            prizes.map((p) => (
-              <div
-                key={p.id}
-                className="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/30 space-y-3 shadow-sm"
-              >
-                <span
-                  className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
-                    p.type === 'main'
-                      ? 'bg-secondary-container text-on-secondary-container'
-                      : 'bg-surface-container-high text-primary'
-                  }`}
-                >
-                  {p.type === 'main' ? '🏆 Premio Mayor (1er Lugar)' : `🎁 Premio Secundario #${p.position}`}
-                </span>
-                <h3 className="font-headline-md text-headline-md font-bold text-primary">
-                  {p.name}
-                </h3>
-                <div className="font-display-lg text-[28px] font-extrabold text-tertiary-fixed-dim">
-                  ${p.value.toLocaleString('es-CO')} COP
+        <div className="space-y-6 animate-in fade-in-50">
+          {/* A. Premios de Sorteo Regular */}
+          <div className="space-y-3">
+            <h3 className="font-headline-md text-base font-bold text-primary flex items-center gap-2">
+              <span className="material-symbols-outlined text-secondary-container">emoji_events</span>
+              Premios de Sorteo Regular (Mayor y Secundarios)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {prizes.filter((p) => p.ruleType !== 'specific_number').length > 0 ? (
+                prizes
+                  .filter((p) => p.ruleType !== 'specific_number')
+                  .map((p) => (
+                    <div
+                      key={p.id}
+                      className="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/30 space-y-3 shadow-sm"
+                    >
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                          p.type === 'main'
+                            ? 'bg-secondary-container text-on-secondary-container'
+                            : 'bg-surface-container-high text-primary'
+                        }`}
+                      >
+                        {p.type === 'main' ? '🏆 Premio Mayor (1er Lugar)' : `🎁 Premio Secundario #${p.position}`}
+                      </span>
+                      <h3 className="font-headline-md text-headline-md font-bold text-primary">
+                        {p.name}
+                      </h3>
+                      <div className="font-display-lg text-[28px] font-extrabold text-tertiary-fixed-dim">
+                        ${p.value.toLocaleString('es-CO')} COP
+                      </div>
+                      <p className="font-body-sm text-xs text-on-surface-variant">{p.rule}</p>
+                    </div>
+                  ))
+              ) : (
+                <div className="col-span-3 p-6 bg-surface-container-lowest rounded-xl text-center text-on-surface-variant">
+                  No hay premios regulares configurados.
                 </div>
-                <p className="font-body-sm text-xs text-on-surface-variant">{p.rule}</p>
-              </div>
-            ))
-          ) : (
-            <div className="col-span-3 p-8 bg-surface-container-lowest rounded-xl text-center text-on-surface-variant">
-              No hay premios configurados para esta rifa.
+              )}
             </div>
-          )}
+          </div>
+
+          {/* B. Números Premiados (Premios Anticipados / Directos) */}
+          <div className="space-y-3 pt-4 border-t border-outline-variant/20">
+            <div className="flex items-center justify-between">
+              <h3 className="font-headline-md text-base font-bold text-primary flex items-center gap-2">
+                <span className="material-symbols-outlined text-amber-500">stars</span>
+                🎯 Números Premiados (Premios Anticipados / Directos)
+              </h3>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                {prizes.filter((p) => p.ruleType === 'specific_number').length} Números Asignados
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {prizes.filter((p) => p.ruleType === 'specific_number').length > 0 ? (
+                prizes
+                  .filter((p) => p.ruleType === 'specific_number')
+                  .map((p) => (
+                    <div
+                      key={p.id}
+                      className="p-4 bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-amber-500/5 rounded-2xl border border-amber-400/50 shadow-sm space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-black tracking-wider text-amber-800">
+                          Premio Directo
+                        </span>
+                        <div className="font-mono font-black text-amber-900 text-base bg-amber-200 px-2 py-0.5 rounded-lg">
+                          #{p.ruleValue || p.winningNumber || '0000'}
+                        </div>
+                      </div>
+                      <h4 className="font-bold text-sm text-primary line-clamp-1">{p.name}</h4>
+                      <div className="font-extrabold text-sm text-emerald-700">
+                        ${p.value.toLocaleString('es-CO')} COP
+                      </div>
+                    </div>
+                  ))
+              ) : (
+                <div className="col-span-4 p-6 bg-surface-container-lowest rounded-xl text-center text-on-surface-variant text-xs">
+                  No se han asignado números premiados directos a esta rifa.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

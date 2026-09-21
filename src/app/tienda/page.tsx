@@ -5,6 +5,12 @@ import Link from 'next/link';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { createClient } from '@/lib/supabase/client';
 
+interface InstantPrize {
+  number: string;
+  name: string;
+  value: number;
+}
+
 interface PublicRaffle {
   id: number;
   name: string;
@@ -20,6 +26,7 @@ interface PublicRaffle {
   status: string;
   winningNumber?: string;
   evidenceUrl?: string;
+  instantPrizes: InstantPrize[];
 }
 
 export default function TiendaPublicaPage() {
@@ -32,7 +39,11 @@ export default function TiendaPublicaPage() {
       setIsLoading(true);
       const { data, error } = await supabase
         .from('raffles')
-        .select('*, lottery_draws(id, winning_number, evidence_url, status, lotteries(name))')
+        .select(`
+          *,
+          lottery_draws (id, winning_number, evidence_url, status, lotteries (name)),
+          raffle_prizes (*)
+        `)
         .in('status', ['active', 'sales_closed', 'completed'])
         .order('id', { ascending: false });
 
@@ -57,6 +68,14 @@ export default function TiendaPublicaPage() {
           const soldPercent = Math.min(100, Math.round((realSoldCount / totalNums) * 100));
           const winningNum = item.lottery_draws?.winning_number || undefined;
 
+          const instantPrizes: InstantPrize[] = (item.raffle_prizes || [])
+            .filter((p: any) => p.rule_type === 'specific_number')
+            .map((p: any) => ({
+              number: p.rule_value || '',
+              name: p.name || 'Premio Anticipado',
+              value: Number(p.prize_value) || 0,
+            }));
+
           return {
             id: item.id,
             name: item.name,
@@ -78,6 +97,7 @@ export default function TiendaPublicaPage() {
             status: item.status || 'active',
             winningNumber: winningNum,
             evidenceUrl: item.lottery_draws?.evidence_url || undefined,
+            instantPrizes,
           };
         });
         setPublicRaffles(mapped);
@@ -206,6 +226,34 @@ export default function TiendaPublicaPage() {
                       <p className="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">
                         {raffle.prizeDescription}
                       </p>
+
+                      {/* Números Premiados (Premios Anticipados/Directos) */}
+                      {raffle.instantPrizes && raffle.instantPrizes.length > 0 && (
+                        <div className="bg-amber-500/10 border border-amber-400/40 p-3 rounded-xl space-y-1.5">
+                          <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                            <span className="flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[16px] text-amber-600">stars</span>
+                              🎯 Números Premiados ({raffle.instantPrizes.length}):
+                            </span>
+                            <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded bg-amber-200 text-amber-950">
+                              Premios Directos
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {raffle.instantPrizes.map((ip, i) => (
+                              <span
+                                key={i}
+                                className="px-2 py-1 bg-amber-100/90 text-amber-950 rounded-lg text-xs font-mono font-black border border-amber-300 shadow-sm flex items-center gap-1"
+                              >
+                                #{ip.number}
+                                <span className="text-[10px] font-semibold text-amber-800 font-sans">
+                                  ({ip.name})
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Sección Ganador vs Barra de Progreso */}
                       {hasWinner ? (
