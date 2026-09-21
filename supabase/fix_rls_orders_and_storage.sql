@@ -48,3 +48,13 @@ CREATE POLICY "Permitir subir comprobantes publicamente" ON storage.objects
 DROP POLICY IF EXISTS "Permitir ver comprobantes publicamente" ON storage.objects;
 CREATE POLICY "Permitir ver comprobantes publicamente" ON storage.objects
   FOR SELECT USING (bucket_id = 'comprobantes');
+
+-- 7. Políticas para la tabla public.raffles
+DROP POLICY IF EXISTS "Permitir gestionar rifas" ON public.raffles;
+CREATE POLICY "Permitir gestionar rifas" ON public.raffles
+  FOR ALL USING (true);
+
+-- 8. Políticas para la tabla public.lottery_draws
+DROP POLICY IF EXISTS "Permitir gestionar sorteos" ON public.lottery_draws;
+CREATE POLICY "Permitir gestionar sorteos" ON public.lottery_draws
+  FOR ALL USING (true);

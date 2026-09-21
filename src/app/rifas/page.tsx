@@ -96,6 +96,43 @@ export default function GestorRifasPage() {
           soldMap.set(item.raffle_id, (soldMap.get(item.raffle_id) || 0) + 1);
         });
 
+        // Reparar automáticamente rifas activas que tengan por error un sorteo finalizado vinculado
+        for (const r of rafflesData) {
+          if (r.status === 'active' && r.lottery_draws?.winning_number) {
+            try {
+              const drawDateStr = r.end_at ? r.end_at.split('T')[0] : new Date().toISOString().split('T')[0];
+              const uniqueDrawNumber = `SRT-${r.id}-${Date.now().toString().slice(-4)}`;
+              const { data: cleanDraw } = await supabase
+                .from('lottery_draws')
+                .insert({
+                  lottery_id: r.lottery_draws?.lottery_id || 1,
+                  draw_number: uniqueDrawNumber,
+                  draw_date: drawDateStr,
+                  status: 'scheduled',
+                  winning_number: null,
+                })
+                .select('id')
+                .single();
+
+              if (cleanDraw) {
+                await supabase
+                  .from('raffles')
+                  .update({ lottery_draw_id: cleanDraw.id })
+                  .eq('id', r.id);
+                r.lottery_draw_id = cleanDraw.id;
+                r.lottery_draws = {
+                  ...r.lottery_draws,
+                  id: cleanDraw.id,
+                  winning_number: null,
+                  status: 'scheduled',
+                };
+              }
+            } catch (repairErr) {
+              console.warn('No se pudo auto-reparar sorteo vinculado para rifa', r.id, repairErr);
+            }
+          }
+        }
+
         const formatted: RaffleItem[] = rafflesData.map((r: any) => ({
           id: r.id,
           name: r.name,
@@ -109,7 +146,7 @@ export default function GestorRifasPage() {
           minOrder: r.minimum_numbers_per_order || 2,
           maxOrder: r.maximum_numbers_per_order || 99999,
           prizesCount: r.raffle_prizes?.length || 1,
-          winningNumber: r.lottery_draws?.winning_number || undefined,
+          winningNumber: (r.status === 'completed' && r.lottery_draws?.winning_number) ? r.lottery_draws.winning_number : undefined,
         }));
         setRaffles(formatted);
       } else {
@@ -186,21 +223,7 @@ export default function GestorRifasPage() {
     try {
       const slugStr = formData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now().toString().slice(-4);
 
-      // 1. Obtener o asignar lottery_draw_id
       const selectedLotteryId = parseInt(formData.lottery_id, 10) || 1;
-      let targetDrawId = 1;
-
-      const { data: existingDraw } = await supabase
-        .from('lottery_draws')
-        .select('id')
-        .eq('lottery_id', selectedLotteryId)
-        .order('id', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (existingDraw) {
-        targetDrawId = existingDraw.id;
-      }
 
       const startDate = new Date();
       let endDate: Date;
@@ -213,7 +236,30 @@ export default function GestorRifasPage() {
         endDate = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
       }
 
-      // 2. Insertar Rifa en public.raffles usando lottery_draw_id
+      // 1. Crear nuevo sorteo oficial programado e independiente para esta rifa en public.lottery_draws
+      const drawDateStr = formData.end_date || endDate.toISOString().split('T')[0];
+      const uniqueDrawNum = `SRT-${selectedLotteryId}-${Date.now().toString().slice(-6)}`;
+
+      let targetDrawId: number | null = null;
+      const { data: newDraw, error: drawErr } = await supabase
+        .from('lottery_draws')
+        .insert({
+          lottery_id: selectedLotteryId,
+          draw_number: uniqueDrawNum,
+          draw_date: drawDateStr,
+          status: 'scheduled',
+          winning_number: null,
+        })
+        .select('id')
+        .single();
+
+      if (drawErr) {
+        console.error('Error creando sorteo de lotería individual:', drawErr);
+      } else if (newDraw) {
+        targetDrawId = newDraw.id;
+      }
+
+      // 2. Insertar Rifa en public.raffles usando su sorteo independiente
       const { data: newRaffle, error: raffleErr } = await supabase
         .from('raffles')
         .insert({
@@ -367,7 +413,7 @@ export default function GestorRifasPage() {
       ) : filteredRaffles.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-base md:gap-gutter">
           {filteredRaffles.map((raffle) => {
-            const hasWinner = Boolean(raffle.winningNumber) || raffle.status === 'completed';
+            const hasWinner = raffle.status === 'completed' && Boolean(raffle.winningNumber);
 
             return (
               <div

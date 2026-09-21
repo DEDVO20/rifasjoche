@@ -66,7 +66,8 @@ export default function TiendaPublicaPage() {
           const realSoldCount = soldCountMap.get(item.id) || 0;
           const totalNums = item.total_numbers || 10000;
           const soldPercent = Math.min(100, Math.round((realSoldCount / totalNums) * 100));
-          const winningNum = item.lottery_draws?.winning_number || undefined;
+          const isCompleted = item.status === 'completed';
+          const winningNum = (isCompleted && item.lottery_draws?.winning_number) ? item.lottery_draws.winning_number : undefined;
 
           const instantPrizes: InstantPrize[] = (item.raffle_prizes || [])
             .filter((p: any) => p.rule_type === 'specific_number')
@@ -171,7 +172,7 @@ export default function TiendaPublicaPage() {
         ) : publicRaffles.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {publicRaffles.map((raffle) => {
-              const hasWinner = Boolean(raffle.winningNumber);
+              const hasWinner = raffle.status === 'completed' && Boolean(raffle.winningNumber);
 
               return (
                 <div

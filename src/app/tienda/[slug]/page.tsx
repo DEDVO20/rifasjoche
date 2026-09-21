@@ -151,8 +151,8 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
             : 'Próximamente',
           description: data.description || 'Participa y gana fabulosos premios con este sorteo verificado.',
           status: data.status || 'active',
-          winningNumber: data.lottery_draws?.winning_number || undefined,
-          evidenceUrl: data.lottery_draws?.evidence_url || undefined,
+          winningNumber: (data.status === 'completed' && data.lottery_draws?.winning_number) ? data.lottery_draws.winning_number : undefined,
+          evidenceUrl: data.status === 'completed' ? (data.lottery_draws?.evidence_url || undefined) : undefined,
           prizes: formattedPrizes.length > 0 ? formattedPrizes : [
             {
               name: '🏆 Premio Mayor',

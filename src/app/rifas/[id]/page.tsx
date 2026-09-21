@@ -95,6 +95,42 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         return;
       }
 
+      // Si la rifa está activa pero tiene por error un sorteo con número ganador de otra rifa, auto-desacoplarla
+      if (raffleData.status === 'active' && raffleData.lottery_draws?.winning_number) {
+        try {
+          const drawDateStr = raffleData.end_at ? raffleData.end_at.split('T')[0] : new Date().toISOString().split('T')[0];
+          const uniqueDrawNumber = `SRT-${raffleData.id}-${Date.now().toString().slice(-4)}`;
+          const { data: cleanDraw } = await supabase
+            .from('lottery_draws')
+            .insert({
+              lottery_id: raffleData.lottery_draws?.lottery_id || 1,
+              draw_number: uniqueDrawNumber,
+              draw_date: drawDateStr,
+              status: 'scheduled',
+              winning_number: null,
+            })
+            .select('id')
+            .single();
+
+          if (cleanDraw) {
+            await supabase
+              .from('raffles')
+              .update({ lottery_draw_id: cleanDraw.id })
+              .eq('id', raffleData.id);
+
+            raffleData.lottery_draw_id = cleanDraw.id;
+            raffleData.lottery_draws = {
+              ...raffleData.lottery_draws,
+              id: cleanDraw.id,
+              winning_number: null,
+              status: 'scheduled',
+            };
+          }
+        } catch (repairErr) {
+          console.warn('Error reparando sorteo de rifa:', repairErr);
+        }
+      }
+
       // 2. Obtener los boletos vendidos/reservados reales en raffle_numbers
       const { data: soldNumbersData } = await supabase
         .from('raffle_numbers')
@@ -191,6 +227,10 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         .filter((o) => o.status === 'approved')
         .reduce((sum, o) => sum + o.total, 0);
 
+      const isCompleted = raffleData.status === 'completed';
+      const currentWinningNumber = isCompleted ? (raffleData.lottery_draws?.winning_number || '') : '';
+      const currentEvidenceUrl = isCompleted ? (raffleData.lottery_draws?.evidence_url || '') : '';
+
       setRaffle({
         id: raffleData.id,
         name: raffleData.name,
@@ -210,16 +250,15 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         availableCount: actualAvailable,
         totalRevenue: totalRevenue,
         status: raffleData.status || 'active',
-        winningNumber: raffleData.lottery_draws?.winning_number || '',
-        evidenceUrl: raffleData.lottery_draws?.evidence_url || '',
+        winningNumber: currentWinningNumber,
+        evidenceUrl: currentEvidenceUrl,
       });
 
-      const currentWinningNumber = raffleData.lottery_draws?.winning_number || '';
       setInputWinningNumber(currentWinningNumber);
-      setInputEvidenceUrl(raffleData.lottery_draws?.evidence_url || '');
+      setInputEvidenceUrl(currentEvidenceUrl);
 
-      // Validar si ya tiene número ganador para buscar ganador y bloquearlo
-      if (currentWinningNumber) {
+      // Validar si ya tiene número ganador oficial para buscar ganador y bloquearlo
+      if (currentWinningNumber && isCompleted) {
         setIsResultLocked(true);
 
         const numLength =
@@ -420,6 +459,27 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
             status: 'verified',
           })
           .eq('id', rData.lottery_draw_id);
+      } else {
+        // Si no tenía sorteo asignado, crear uno nuevo verificado
+        const { data: createdDraw } = await supabase
+          .from('lottery_draws')
+          .insert({
+            lottery_id: 1,
+            draw_number: `SRT-${raffle.id}-${Date.now().toString().slice(-4)}`,
+            draw_date: new Date().toISOString().split('T')[0],
+            winning_number: formattedWinningNumber,
+            evidence_url: inputEvidenceUrl,
+            status: 'verified',
+          })
+          .select('id')
+          .single();
+
+        if (createdDraw) {
+          await supabase
+            .from('raffles')
+            .update({ lottery_draw_id: createdDraw.id })
+            .eq('id', raffle.id);
+        }
       }
 
       // Marcar rifa como completada
