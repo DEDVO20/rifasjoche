@@ -232,8 +232,9 @@ export async function POST(req: NextRequest) {
           prizeValue: Number(p.prize_value) || 0,
         }));
 
-      // Identificar si alguno de los boletos del usuario es ganador
+      // Identificar si alguno de los boletos del usuario es ganador (Máximo 1 premio instantáneo por compra)
       const winningTickets: { [ticketNum: string]: { prizeName: string; prizeValue?: number; isMainPrize: boolean } } = {};
+      let hasInstantPrizeAssigned = false;
 
       numbers.forEach((numStr) => {
         // A. Coincidencia con número ganador de lotería (Premio Mayor)
@@ -246,14 +247,17 @@ export async function POST(req: NextRequest) {
           };
         }
 
-        // B. Coincidencia con Número Premiado Directo / Anticipado
-        const instantMatch = instantPrizes.find((ip: any) => ip.number === numStr || parseInt(ip.number, 10) === parseInt(numStr, 10));
-        if (instantMatch) {
-          winningTickets[numStr] = {
-            prizeName: instantMatch.prizeName,
-            prizeValue: instantMatch.prizeValue,
-            isMainPrize: false,
-          };
+        // B. Coincidencia con Número Premiado Directo / Anticipado (máximo 1 por compra)
+        if (!hasInstantPrizeAssigned) {
+          const instantMatch = instantPrizes.find((ip: any) => ip.number === numStr || parseInt(ip.number, 10) === parseInt(numStr, 10));
+          if (instantMatch) {
+            winningTickets[numStr] = {
+              prizeName: instantMatch.prizeName,
+              prizeValue: instantMatch.prizeValue,
+              isMainPrize: false,
+            };
+            hasInstantPrizeAssigned = true;
+          }
         }
       });
 

@@ -77,14 +77,21 @@ export async function POST(
 
     const matchedInstantPrizes: { number: string; prizeName: string; prizeValue?: number }[] = [];
     (instantPrizesData || []).forEach((ip: any) => {
-      if (ticketList.includes(ip.rule_value)) {
+      const match = ticketList.find(
+        (t: string) => t === ip.rule_value || parseInt(t, 10) === parseInt(ip.rule_value, 10)
+      );
+      if (match) {
         matchedInstantPrizes.push({
-          number: ip.rule_value,
+          number: match,
           prizeName: ip.name,
           prizeValue: ip.prize_value ? Number(ip.prize_value) : undefined,
         });
       }
     });
+
+    // REGLA CRÍTICA: No se pueden enviar 2 números premiados en una sola compra (máximo 1 premio por compra)
+    matchedInstantPrizes.sort((a, b) => (b.prizeValue || 0) - (a.prizeValue || 0));
+    const finalInstantWinningPrizes = matchedInstantPrizes.slice(0, 1);
 
     // 5. Reenviar correo con Resend
     const emailResult = await sendTicketConfirmationEmail({
@@ -96,7 +103,7 @@ export async function POST(
       drawDate,
       ticketNumbers: ticketList,
       totalAmount: Number(order.total) || 0,
-      instantWinningPrizes: matchedInstantPrizes,
+      instantWinningPrizes: finalInstantWinningPrizes,
     });
 
     if (!emailResult.success) {

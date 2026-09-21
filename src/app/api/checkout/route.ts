@@ -86,13 +86,19 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Generar números aleatorios únicos disponibles
-    const { data: soldRows } = await supabase
-      .from('raffle_numbers')
-      .select('number')
-      .eq('raffle_id', raffleId);
+    // Consultar números ya reservados/vendidos y números premiados de la rifa
+    const [soldRes, prizesRes] = await Promise.all([
+      supabase.from('raffle_numbers').select('number').eq('raffle_id', raffleId),
+      supabase
+        .from('raffle_prizes')
+        .select('rule_value')
+        .eq('raffle_id', raffleId)
+        .eq('rule_type', 'specific_number'),
+    ]);
 
-    const takenSet = new Set((soldRows || []).map((r) => r.number));
+    const takenSet = new Set((soldRes.data || []).map((r: any) => r.number));
     const totalPossible = raffle.total_numbers || 10000;
+    const numberLength = raffle.number_length || 4;
     const availableCount = Math.max(0, totalPossible - takenSet.size);
 
     if (availableCount <= 0) {
@@ -112,23 +118,65 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Identificar todos los números premiados configurados para este sorteo
+    const winningNumbersSet = new Set<string>();
+    (prizesRes.data || []).forEach((p: any) => {
+      if (p.rule_value) {
+        const cleanVal = p.rule_value.trim();
+        const padded = cleanVal.padStart(numberLength, '0');
+        winningNumbersSet.add(padded);
+        winningNumbersSet.add(cleanVal);
+        const parsed = parseInt(cleanVal, 10);
+        if (!isNaN(parsed)) {
+          winningNumbersSet.add(parsed.toString());
+        }
+      }
+    });
+
+    const isWinningNumber = (num: string): boolean => {
+      if (winningNumbersSet.has(num)) return true;
+      const parsed = parseInt(num, 10);
+      if (!isNaN(parsed) && winningNumbersSet.has(parsed.toString())) return true;
+      return false;
+    };
+
+    // Asignar números aleatorios asegurando MÁXIMO 1 NÚMERO PREMIADO en toda la compra
     const assignedNumbers: string[] = [];
+    let assignedWinningCount = 0;
 
     let attempts = 0;
     while (assignedNumbers.length < quantity && attempts < 50000) {
       attempts++;
       const randomInt = Math.floor(Math.random() * totalPossible);
-      const numStr = randomInt.toString().padStart(raffle.number_length || 4, '0');
+      const numStr = randomInt.toString().padStart(numberLength, '0');
       if (!takenSet.has(numStr) && !assignedNumbers.includes(numStr)) {
+        const isWinning = isWinningNumber(numStr);
+
+        // REGLA CRÍTICA: En una sola compra NO se pueden enviar/asignar 2 números premiados (máximo 1)
+        if (isWinning && assignedWinningCount >= 1) {
+          continue; // Ya tiene un número premiado asignado en esta compra; omitir este y buscar otro
+        }
+
         assignedNumbers.push(numStr);
+        if (isWinning) {
+          assignedWinningCount++;
+        }
       }
     }
 
+    // Búsqueda secuencial de respaldo si se agotaron los intentos aleatorios
     if (assignedNumbers.length < quantity) {
       for (let i = 0; i < totalPossible && assignedNumbers.length < quantity; i++) {
-        const numStr = i.toString().padStart(raffle.number_length || 4, '0');
+        const numStr = i.toString().padStart(numberLength, '0');
         if (!takenSet.has(numStr) && !assignedNumbers.includes(numStr)) {
+          const isWinning = isWinningNumber(numStr);
+          if (isWinning && assignedWinningCount >= 1) {
+            continue;
+          }
           assignedNumbers.push(numStr);
+          if (isWinning) {
+            assignedWinningCount++;
+          }
         }
       }
     }
