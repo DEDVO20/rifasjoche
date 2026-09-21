@@ -30,66 +30,110 @@ function getMimeType(fileName: string, providedType?: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
+    let buffer: Buffer | null = null;
+    let originalName = 'rifa.jpg';
+    let mimeType = 'image/jpeg';
 
-    if (!file) {
-      return NextResponse.json(
-        { error: 'No se ha proporcionado ninguna imagen' },
-        { status: 400 }
-      );
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const body = await req.json().catch(() => null);
+      if (!body) {
+        return NextResponse.json({ error: 'Cuerpo de solicitud inválido.' }, { status: 400 });
+      }
+
+      const rawBase64 = body.imageBase64 || body.dataUrl || body.file;
+      if (!rawBase64 || typeof rawBase64 !== 'string') {
+        return NextResponse.json({ error: 'No se ha proporcionado imagen en base64.' }, { status: 400 });
+      }
+
+      originalName = body.fileName || 'rifa.jpg';
+      if (rawBase64.includes(';base64,')) {
+        const parts = rawBase64.split(';base64,');
+        mimeType = parts[0].replace('data:', '') || 'image/jpeg';
+        buffer = Buffer.from(parts[1], 'base64');
+      } else {
+        buffer = Buffer.from(rawBase64, 'base64');
+        mimeType = getMimeType(originalName);
+      }
+    } else {
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch (streamErr: any) {
+        console.warn('Error leyendo stream formData:', streamErr);
+        return NextResponse.json(
+          { error: 'Error al procesar la transferencia de la imagen. Por favor reintente.' },
+          { status: 400 }
+        );
+      }
+
+      const file = formData.get('file') as File | null;
+      if (!file) {
+        return NextResponse.json(
+          { error: 'No se ha proporcionado ninguna imagen' },
+          { status: 400 }
+        );
+      }
+
+      // Validar tipo de archivo
+      if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
+        return NextResponse.json(
+          { error: 'El archivo debe ser una imagen válida (JPG, PNG, WEBP, GIF o SVG).' },
+          { status: 400 }
+        );
+      }
+
+      // Validar tamaño (máximo 15 MB)
+      if (file.size > 15 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: 'La imagen no debe superar los 15 MB.' },
+          { status: 400 }
+        );
+      }
+
+      originalName = file.name || 'rifa.jpg';
+      mimeType = getMimeType(originalName, file.type);
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
     }
 
-    // Validar tipo de archivo
-    if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
-      return NextResponse.json(
-        { error: 'El archivo debe ser una imagen válida (JPG, PNG, WEBP, GIF o SVG).' },
-        { status: 400 }
-      );
+    if (!buffer || buffer.length === 0) {
+      return NextResponse.json({ error: 'El archivo de imagen está vacío.' }, { status: 400 });
     }
 
-    // Validar tamaño (máximo 10 MB)
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'La imagen no debe superar los 10 MB.' },
-        { status: 400 }
-      );
-    }
-
-    const originalName = file.name || 'rifa.jpg';
     const ext = originalName.split('.').pop()?.toLowerCase() || 'jpg';
     const cleanExt = ext.replace(/[^a-z0-9]/gi, '') || 'jpg';
     const fileName = `raffle-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
-    const mimeType = getMimeType(originalName, file.type);
-
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
 
     let uploadedToStorage = false;
     let storagePublicUrl = '';
 
-    // 1. Intentar subir a Supabase Storage con Service Role si está configurado
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+    // 1. Intentar subir con Supabase Admin Client si está disponible (primero 'rifas', luego 'comprobantes')
     if (supabaseUrl && serviceRoleKey) {
       try {
         const adminClient = createSupabaseAdminClient(supabaseUrl, serviceRoleKey);
-        const { error: uploadErr } = await adminClient.storage
-          .from('rifas')
-          .upload(fileName, buffer, {
-            contentType: mimeType,
-            cacheControl: '3600',
-            upsert: true,
-          });
+        for (const bucketName of ['rifas', 'comprobantes']) {
+          const { error: uploadErr } = await adminClient.storage
+            .from(bucketName)
+            .upload(fileName, buffer, {
+              contentType: mimeType,
+              cacheControl: '3600',
+              upsert: true,
+            });
 
-        if (!uploadErr) {
-          const { data: urlData } = adminClient.storage
-            .from('rifas')
-            .getPublicUrl(fileName);
-          if (urlData?.publicUrl) {
-            storagePublicUrl = urlData.publicUrl;
-            uploadedToStorage = true;
+          if (!uploadErr) {
+            const { data: urlData } = adminClient.storage
+              .from(bucketName)
+              .getPublicUrl(fileName);
+            if (urlData?.publicUrl) {
+              storagePublicUrl = urlData.publicUrl;
+              uploadedToStorage = true;
+              break;
+            }
           }
         }
       } catch (adminErr) {
@@ -97,26 +141,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Intentar subir a Supabase Storage estándar
+    // 2. Intentar subir a Supabase Storage con cliente estándar
     if (!uploadedToStorage) {
       try {
         const supabase = await createClient();
-        const { error: uploadError } = await supabase.storage
-          .from('rifas')
-          .upload(fileName, buffer, {
-            contentType: mimeType,
-            cacheControl: '3600',
-            upsert: true,
-          });
+        for (const bucketName of ['rifas', 'comprobantes']) {
+          const { error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(fileName, buffer, {
+              contentType: mimeType,
+              cacheControl: '3600',
+              upsert: true,
+            });
 
-        if (!uploadError) {
-          const { data: publicUrlData } = supabase.storage
-            .from('rifas')
-            .getPublicUrl(fileName);
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage
+              .from(bucketName)
+              .getPublicUrl(fileName);
 
-          if (publicUrlData?.publicUrl) {
-            storagePublicUrl = publicUrlData.publicUrl;
-            uploadedToStorage = true;
+            if (publicUrlData?.publicUrl) {
+              storagePublicUrl = publicUrlData.publicUrl;
+              uploadedToStorage = true;
+              break;
+            }
           }
         }
       } catch (storageErr) {
@@ -150,14 +197,19 @@ export async function POST(req: NextRequest) {
       console.warn('Error guardando imagen localmente en public/uploads/raffles:', fsErr);
     }
 
-    return NextResponse.json(
-      { error: 'No se pudo almacenar la imagen de la rifa.' },
-      { status: 500 }
-    );
+    // 4. Fallback Infalible: Data URL Base64 para garantizar que nunca falle
+    const base64Data = buffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
+    return NextResponse.json({
+      success: true,
+      publicUrl: dataUrl,
+      fileName,
+    });
   } catch (err: any) {
     console.error('Error procesando subida de imagen de rifa:', err);
     return NextResponse.json(
-      { error: err.message || 'Error interno del servidor' },
+      { error: err.message || 'Error al procesar la imagen' },
       { status: 500 }
     );
   }

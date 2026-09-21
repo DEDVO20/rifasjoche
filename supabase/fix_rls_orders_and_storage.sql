@@ -36,18 +36,24 @@ DROP POLICY IF EXISTS "Permitir insertar logs de auditoria" ON public.audit_logs
 CREATE POLICY "Permitir insertar logs de auditoria" ON public.audit_logs
   FOR INSERT WITH CHECK (true);
 
--- 6. Configurar el bucket 'comprobantes' en Storage y permitir subida pública
+-- 6. Configurar buckets 'comprobantes' y 'rifas' en Storage y permitir subida pública
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('comprobantes', 'comprobantes', true)
+VALUES 
+  ('comprobantes', 'comprobantes', true),
+  ('rifas', 'rifas', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
 DROP POLICY IF EXISTS "Permitir subir comprobantes publicamente" ON storage.objects;
 CREATE POLICY "Permitir subir comprobantes publicamente" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'comprobantes');
+  FOR INSERT WITH CHECK (bucket_id IN ('comprobantes', 'rifas'));
 
 DROP POLICY IF EXISTS "Permitir ver comprobantes publicamente" ON storage.objects;
 CREATE POLICY "Permitir ver comprobantes publicamente" ON storage.objects
-  FOR SELECT USING (bucket_id = 'comprobantes');
+  FOR SELECT USING (bucket_id IN ('comprobantes', 'rifas'));
+
+DROP POLICY IF EXISTS "Permitir actualizar comprobantes publicamente" ON storage.objects;
+CREATE POLICY "Permitir actualizar comprobantes publicamente" ON storage.objects
+  FOR UPDATE USING (bucket_id IN ('comprobantes', 'rifas'));
 
 -- 7. Políticas para la tabla public.raffles
 DROP POLICY IF EXISTS "Permitir gestionar rifas" ON public.raffles;

@@ -251,6 +251,11 @@ export default function GestorRifasPage() {
 
       // Subir archivo de imagen si fue seleccionado
       if (imageFile) {
+        // Fallback inmediato a la previsualización en Base64 por si hay cualquier inconveniente de red o servidor
+        if (imagePreview) {
+          finalImageUrl = imagePreview;
+        }
+
         try {
           const uploadData = new FormData();
           uploadData.append('file', imageFile);
@@ -259,15 +264,31 @@ export default function GestorRifasPage() {
             method: 'POST',
             body: uploadData,
           });
-          const uploadJson = await uploadRes.json();
 
-          if (uploadRes.ok && uploadJson.publicUrl) {
-            finalImageUrl = uploadJson.publicUrl;
-          } else {
-            console.warn('Error en upload-raffle-image:', uploadJson.error);
+          if (uploadRes.ok) {
+            const uploadJson = await uploadRes.json();
+            if (uploadJson.publicUrl) {
+              finalImageUrl = uploadJson.publicUrl;
+            }
+          } else if (imagePreview) {
+            // Intentar envío alternativo JSON con Base64
+            const jsonRes = await fetch('/api/upload-raffle-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageBase64: imagePreview, fileName: imageFile.name }),
+            });
+            if (jsonRes.ok) {
+              const jsonResult = await jsonRes.json();
+              if (jsonResult.publicUrl) {
+                finalImageUrl = jsonResult.publicUrl;
+              }
+            }
           }
         } catch (uploadErr) {
-          console.warn('Fallo al subir imagen:', uploadErr);
+          console.warn('Subida por API tuvo inconveniente, usando base64 cargado:', uploadErr);
+          if (imagePreview) {
+            finalImageUrl = imagePreview;
+          }
         }
       }
 

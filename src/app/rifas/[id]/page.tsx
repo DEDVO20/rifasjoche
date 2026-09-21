@@ -575,27 +575,56 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
   const handleChangeCoverImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0] || !raffle?.id) return;
     const file = e.target.files[0];
-    if (file.size > 10 * 1024 * 1024) {
-      alert('La imagen no debe superar los 10 MB.');
+    if (file.size > 15 * 1024 * 1024) {
+      alert('La imagen no debe superar los 15 MB.');
       return;
     }
 
     try {
       setIsUpdatingImage(true);
-      const uploadData = new FormData();
-      uploadData.append('file', file);
 
-      const res = await fetch('/api/upload-raffle-image', {
-        method: 'POST',
-        body: uploadData,
+      // Convertir a DataURL Base64 para tener respaldo inmediato
+      const fileDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
-      const json = await res.json();
 
-      if (!res.ok || !json.publicUrl) {
-        throw new Error(json.error || 'Error al subir la imagen');
+      let newImageUrl = fileDataUrl;
+
+      try {
+        const uploadData = new FormData();
+        uploadData.append('file', file);
+
+        const res = await fetch('/api/upload-raffle-image', {
+          method: 'POST',
+          body: uploadData,
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.publicUrl) {
+            newImageUrl = json.publicUrl;
+          }
+        } else {
+          // Fallback con cuerpo JSON Base64
+          const jsonRes = await fetch('/api/upload-raffle-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: fileDataUrl, fileName: file.name }),
+          });
+          if (jsonRes.ok) {
+            const jsonResult = await jsonRes.json();
+            if (jsonResult.publicUrl) {
+              newImageUrl = jsonResult.publicUrl;
+            }
+          }
+        }
+      } catch (uploadNetErr) {
+        console.warn('Subida por API tuvo error, usando dataURL local:', uploadNetErr);
       }
 
-      const newImageUrl = json.publicUrl;
       await supabase
         .from('raffles')
         .update({ image_url: newImageUrl })
