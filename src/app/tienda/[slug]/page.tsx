@@ -64,7 +64,7 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
   const supabase = createClient();
 
   // Llave única oficial designada (recibe de cualquier entidad / banco)
-  const DESIGNATED_PAYMENT_KEY = '3146676688';
+  const DESIGNATED_PAYMENT_KEY = '3205107590';
 
   // Form checkout pre-llenado si está logueado
   const [customerForm, setCustomerForm] = useState({

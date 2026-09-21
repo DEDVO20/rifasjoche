@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
         customer_document: customerDocument || '',
         proof_url: proofUrl || null,
         transaction_ref: transactionReference || null,
-        payment_key: paymentKey || '3146676688',
+        payment_key: paymentKey || '3205107590',
       },
     });
 
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
         customer_phone: customerPhone,
         customer_email: customerEmail,
         customer_document: customerDocument || '',
-        payment_key: paymentKey || '3146676688',
+        payment_key: paymentKey || '3205107590',
         transaction_reference: transactionReference || 'Comprobante Adjunto',
         proof_url: proofUrl || null,
       },
