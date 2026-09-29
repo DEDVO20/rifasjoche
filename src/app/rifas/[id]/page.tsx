@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
@@ -8,6 +8,11 @@ interface TicketNumber {
   number: string;
   status: 'available' | 'sold' | 'reserved';
   owner?: string;
+  email?: string;
+  phone?: string;
+  orderNumber?: string;
+  orderId?: string;
+  orderDate?: string;
 }
 
 interface Prize {
@@ -49,7 +54,10 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
   const [activeTab, setActiveTab] = useState<'resumen' | 'numeros' | 'ventas' | 'premios' | 'resultados'>('resumen');
   const [searchNumber, setSearchNumber] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [rangeFilter, setRangeFilter] = useState('0000-0999');
+  const [rangeFilter, setRangeFilter] = useState('all');
+  const [rangeBlockSize, setRangeBlockSize] = useState<number>(100);
+  const [displayPage, setDisplayPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(500);
   const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
 
   // Estados de datos reales
@@ -137,11 +145,6 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         .select('*')
         .eq('raffle_id', params.id);
 
-      const soldMap = new Map<string, 'sold' | 'reserved'>();
-      (soldNumbersData || []).forEach((row) => {
-        soldMap.set(row.number, row.status === 'reserved' ? 'reserved' : 'sold');
-      });
-
       // 3. Obtener órdenes reales de compra de esta rifa (soporta clientes registrados e invitados)
       const { data: rawOrdersData, error: ordersErr } = await supabase
         .from('orders')
@@ -154,6 +157,13 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
       }
 
       let realOrders: SaleOrder[] = [];
+      const ordersInfoByOrderId = new Map<number, {
+        orderNumber: string;
+        clientName: string;
+        clientEmail: string;
+        clientPhone: string;
+        orderDate: string;
+      }>();
 
       if (rawOrdersData && rawOrdersData.length > 0) {
         const orderIds = rawOrdersData.map((o) => o.id);
@@ -182,6 +192,27 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
           const cur = numbersByOrderId.get(row.order_id) || [];
           cur.push(row.number);
           numbersByOrderId.set(row.order_id, cur);
+        });
+
+        rawOrdersData.forEach((ord: any) => {
+          const profile = ord.user_id ? profilesById.get(ord.user_id) : null;
+          const payment = paymentsByOrderId.get(ord.id);
+          const payMeta = payment?.metadata || {};
+          const clientName = payMeta?.customer_name || profile?.full_name || 'Comprador';
+          const clientEmail = payMeta?.customer_email || profile?.email || 'Sin correo';
+          const clientPhone = payMeta?.customer_phone || profile?.phone || '';
+          const orderDate = new Date(ord.created_at).toLocaleString('es-CO', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+          });
+
+          ordersInfoByOrderId.set(ord.id, {
+            orderNumber: ord.order_number || `ORD-${ord.id}`,
+            clientName,
+            clientEmail,
+            clientPhone,
+            orderDate,
+          });
         });
 
         realOrders = rawOrdersData.map((ord: any) => {
@@ -218,6 +249,34 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
       setSalesOrders(realOrders);
 
+      // Mapa completo de estado y comprador de boletos vendidos/reservados
+      const soldDetailsMap = new Map<string, {
+        status: 'sold' | 'reserved';
+        owner?: string;
+        email?: string;
+        phone?: string;
+        orderNumber?: string;
+        orderId?: string;
+        orderDate?: string;
+      }>();
+
+      (soldNumbersData || []).forEach((row: any) => {
+        const ordInfo = row.order_id ? ordersInfoByOrderId.get(row.order_id) : null;
+        const status: 'sold' | 'reserved' = row.status === 'reserved' ? 'reserved' : 'sold';
+        const data = {
+          status,
+          owner: ordInfo?.clientName,
+          email: ordInfo?.clientEmail,
+          phone: ordInfo?.clientPhone,
+          orderNumber: ordInfo?.orderNumber,
+          orderId: row.order_id ? row.order_id.toString() : undefined,
+          orderDate: ordInfo?.orderDate,
+        };
+        soldDetailsMap.set(row.number, data);
+        const trimmed = row.number.replace(/^0+/, '') || '0';
+        soldDetailsMap.set(trimmed, data);
+      });
+
       // Calcular métricas reales
       const totalNums = raffleData.total_numbers || 1000;
       const actualSoldCount = (soldNumbersData || []).filter((s) => s.status === 'sold').length;
@@ -247,6 +306,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         imageUrl: raffleData.image_url || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80',
         pricePerNumber: Number(raffleData.price_per_number) || 10000,
         totalNumbers: totalNums,
+        numberLength: raffleData.number_length || (totalNums > 0 ? (totalNums - 1).toString().length : 4),
         soldCount: actualSoldCount,
         reservedCount: actualReservedCount,
         availableCount: actualAvailable,
@@ -371,23 +431,43 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
 
       setPrizes(realPrizes);
 
-      // 5. Generar lista de números disponibles basada en la DB real (sin simulación)
+      // 5. Generar lista completa de todos los números del talonario (sin simulación)
+      const numLength =
+        raffleData.number_length ||
+        (totalNums > 0 ? (totalNums - 1).toString().length : 4);
       const list: TicketNumber[] = [];
-      const startRange = rangeFilter === '0000-0999' ? 0 : 1000;
-      const endRange = Math.min(totalNums, startRange + 100);
-
-      for (let i = startRange; i < endRange; i++) {
-        const numStr = i.toString().padStart(4, '0');
-        const dbStatus = soldMap.get(numStr) || 'available';
-        list.push({ number: numStr, status: dbStatus });
+      for (let i = 0; i < totalNums; i++) {
+        const numStr = i.toString().padStart(numLength, '0');
+        const info = soldDetailsMap.get(numStr) || soldDetailsMap.get(i.toString());
+        if (info) {
+          list.push({
+            number: numStr,
+            status: info.status,
+            owner: info.owner,
+            email: info.email,
+            phone: info.phone,
+            orderNumber: info.orderNumber,
+            orderId: info.orderId,
+            orderDate: info.orderDate,
+          });
+        } else {
+          list.push({
+            number: numStr,
+            status: 'available',
+          });
+        }
       }
       setTicketNumbers(list);
+
+      // Configurar tamaño de bloque sugerido
+      const defaultStep = totalNums <= 200 ? 50 : totalNums <= 1000 ? 100 : totalNums <= 5000 ? 500 : 1000;
+      setRangeBlockSize(defaultStep);
     } catch (err) {
       console.error('Error cargando detalles de rifa:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [params.id, rangeFilter, supabase]);
+  }, [params.id, supabase]);
 
   useEffect(() => {
     loadRaffleDetails();
@@ -648,11 +728,99 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
     );
   }
 
-  const filteredNumbers = ticketNumbers.filter((item) => {
-    const matchesSearch = item.number.includes(searchNumber);
-    const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Opciones dinámicas de rango según el total de números y tamaño de bloque
+  const rangeOptions = useMemo(() => {
+    if (!raffle || !raffle.totalNumbers) return [];
+    const total = raffle.totalNumbers;
+    const numLength = raffle.numberLength || (total > 0 ? (total - 1).toString().length : 4);
+    const step = rangeBlockSize;
+
+    const ranges: { value: string; label: string; start: number; end: number }[] = [
+      {
+        value: 'all',
+        label: `Todos los números (0000 - ${(total - 1).toString().padStart(numLength, '0')})`,
+        start: 0,
+        end: total - 1,
+      },
+    ];
+
+    for (let start = 0; start < total; start += step) {
+      const end = Math.min(total - 1, start + step - 1);
+      const startStr = start.toString().padStart(numLength, '0');
+      const endStr = end.toString().padStart(numLength, '0');
+      ranges.push({
+        value: `${start}-${end}`,
+        label: `Rango: ${startStr} - ${endStr}`,
+        start,
+        end,
+      });
+    }
+
+    return ranges;
+  }, [raffle?.totalNumbers, raffle?.numberLength, rangeBlockSize]);
+
+  const currentRangeIndex = rangeOptions.findIndex((r) => r.value === rangeFilter);
+
+  const handlePrevRange = () => {
+    if (currentRangeIndex > 1) {
+      setRangeFilter(rangeOptions[currentRangeIndex - 1].value);
+      setDisplayPage(1);
+    }
+  };
+
+  const handleNextRange = () => {
+    if (currentRangeIndex >= 1 && currentRangeIndex < rangeOptions.length - 1) {
+      setRangeFilter(rangeOptions[currentRangeIndex + 1].value);
+      setDisplayPage(1);
+    } else if (currentRangeIndex === 0 && rangeOptions.length > 1) {
+      setRangeFilter(rangeOptions[1].value);
+      setDisplayPage(1);
+    }
+  };
+
+  const filteredNumbers = useMemo(() => {
+    let list = ticketNumbers;
+
+    // 1. Si hay texto de búsqueda, buscar en TODO el talonario
+    if (searchNumber.trim()) {
+      const q = searchNumber.trim();
+      list = list.filter((item) => item.number.includes(q));
+    } else if (rangeFilter !== 'all') {
+      // 2. Si no hay búsqueda y hay rango seleccionado
+      const [startStr, endStr] = rangeFilter.split('-');
+      const start = parseInt(startStr, 10);
+      const end = parseInt(endStr, 10);
+      if (!isNaN(start) && !isNaN(end)) {
+        list = list.filter((item) => {
+          const val = parseInt(item.number, 10);
+          return val >= start && val <= end;
+        });
+      }
+    }
+
+    // 3. Filtrar por estado
+    if (statusFilter !== 'all') {
+      list = list.filter((item) => item.status === statusFilter);
+    }
+
+    return list;
+  }, [ticketNumbers, searchNumber, rangeFilter, statusFilter]);
+
+  const totalPages = Math.ceil(filteredNumbers.length / pageSize) || 1;
+  const paginatedNumbers = useMemo(() => {
+    if (pageSize >= filteredNumbers.length) return filteredNumbers;
+    const startIdx = (displayPage - 1) * pageSize;
+    return filteredNumbers.slice(startIdx, startIdx + pageSize);
+  }, [filteredNumbers, displayPage, pageSize]);
+
+  const visibleAvailable = useMemo(() => filteredNumbers.filter((t) => t.status === 'available').length, [filteredNumbers]);
+  const visibleSold = useMemo(() => filteredNumbers.filter((t) => t.status === 'sold').length, [filteredNumbers]);
+  const visibleReserved = useMemo(() => filteredNumbers.filter((t) => t.status === 'reserved').length, [filteredNumbers]);
+
+  const selectedTicket = useMemo(() => {
+    if (!selectedNumber) return null;
+    return ticketNumbers.find((t) => t.number === selectedNumber) || null;
+  }, [selectedNumber, ticketNumbers]);
 
   const percentSold = raffle.totalNumbers > 0 ? Math.round((raffle.soldCount / raffle.totalNumbers) * 100) : 0;
 
@@ -851,59 +1019,271 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
       {/* 2. PESTAÑA: NÚMEROS (TALONARIO REAL) */}
       {activeTab === 'numeros' && (
         <div className="space-y-6 animate-in fade-in-50">
-          <div className="flex flex-col md:flex-row gap-4 bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/20">
-            <div className="relative flex-1">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">
-                search
-              </span>
-              <input
-                type="text"
-                placeholder="Buscar número específico (ej. 0042)..."
-                value={searchNumber}
-                onChange={(e) => setSearchNumber(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-outline-variant rounded-lg bg-surface-container-lowest focus:ring-2 focus:ring-primary font-body-md text-body-md"
-              />
+          {/* Barra de Filtros y Control de Rangos */}
+          <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/20 shadow-sm space-y-3">
+            <div className="flex flex-col lg:flex-row gap-3">
+              {/* Buscador de número */}
+              <div className="relative flex-1">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">
+                  search
+                </span>
+                <input
+                  type="text"
+                  placeholder="Buscar en todo el talonario (ej. 0042)..."
+                  value={searchNumber}
+                  onChange={(e) => {
+                    setSearchNumber(e.target.value);
+                    setDisplayPage(1);
+                  }}
+                  className="w-full pl-10 pr-10 py-2.5 border border-outline-variant rounded-xl bg-surface-container-lowest focus:ring-2 focus:ring-primary font-body-md text-sm font-semibold"
+                />
+                {searchNumber && (
+                  <button
+                    onClick={() => {
+                      setSearchNumber('');
+                      setDisplayPage(1);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary p-1 rounded-full text-xs font-bold"
+                    title="Limpiar búsqueda"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Filtros de Estado, Tamaño de Bloque y Rango */}
+              <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center">
+                {/* Filtro de Estado */}
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setDisplayPage(1);
+                  }}
+                  className="px-3 py-2.5 border border-outline-variant rounded-xl bg-surface-container-lowest text-xs sm:text-sm font-bold text-primary focus:ring-2 focus:ring-primary"
+                >
+                  <option value="all">Todos los estados ({ticketNumbers.length})</option>
+                  <option value="available">🟢 Disponibles ({raffle.availableCount})</option>
+                  <option value="sold">🔴 Vendidos ({raffle.soldCount})</option>
+                  <option value="reserved">🟡 Reservados ({raffle.reservedCount})</option>
+                </select>
+
+                {/* Tamaño de Bloque de Rango */}
+                <div className="hidden sm:flex items-center gap-1 bg-surface-container-low px-2 py-1 rounded-xl border border-outline-variant/30">
+                  <span className="text-[11px] font-bold text-on-surface-variant px-1">Bloque:</span>
+                  <select
+                    value={rangeBlockSize}
+                    onChange={(e) => {
+                      setRangeBlockSize(Number(e.target.value));
+                      setRangeFilter('all');
+                      setDisplayPage(1);
+                    }}
+                    className="bg-transparent text-xs font-bold text-primary border-none focus:ring-0 cursor-pointer"
+                  >
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                    <option value={1000}>1000</option>
+                  </select>
+                </div>
+
+                {/* Selector Dinámico de Rangos con Botones Previo / Siguiente */}
+                <div className="flex items-center gap-1 bg-surface-container-low p-1 rounded-xl border border-outline-variant/30 flex-1 sm:flex-initial">
+                  <button
+                    onClick={handlePrevRange}
+                    disabled={currentRangeIndex <= 1}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-surface-container-high transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Rango anterior"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                  </button>
+
+                  <select
+                    value={rangeFilter}
+                    onChange={(e) => {
+                      setRangeFilter(e.target.value);
+                      setDisplayPage(1);
+                    }}
+                    className="px-2 py-1.5 bg-surface-container-lowest border border-outline-variant rounded-lg text-xs sm:text-sm font-bold text-primary focus:ring-2 focus:ring-primary max-w-[200px] sm:max-w-none truncate"
+                  >
+                    {rangeOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={handleNextRange}
+                    disabled={currentRangeIndex >= rangeOptions.length - 1 || currentRangeIndex === -1}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-surface-container-high transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Rango siguiente"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2 border border-outline-variant rounded-lg bg-surface-container-lowest font-body-md text-body-md font-semibold"
-              >
-                <option value="all">Todos los estados</option>
-                <option value="available">Disponibles ({raffle.availableCount})</option>
-                <option value="sold">Vendidos ({raffle.soldCount})</option>
-              </select>
-              <select
-                value={rangeFilter}
-                onChange={(e) => setRangeFilter(e.target.value)}
-                className="px-4 py-2 border border-outline-variant rounded-lg bg-surface-container-lowest font-body-md text-body-md font-semibold"
-              >
-                <option value="0000-0999">Rango: 0000-0099</option>
-                <option value="1000-1999">Rango: 1000-1099</option>
-              </select>
+
+            {/* Barra Informativa y Chips de Resumen */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-outline-variant/20 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-on-surface-variant font-medium">
+                  Mostrando <strong>{paginatedNumbers.length}</strong> de <strong>{filteredNumbers.length}</strong> números
+                </span>
+                <span className="px-2 py-0.5 rounded-full font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 text-[11px]">
+                  ● {visibleAvailable} libres
+                </span>
+                <span className="px-2 py-0.5 rounded-full font-bold bg-rose-500/10 text-rose-700 border border-rose-500/20 text-[11px]">
+                  ● {visibleSold} vendidos
+                </span>
+                {visibleReserved > 0 && (
+                  <span className="px-2 py-0.5 rounded-full font-bold bg-amber-500/10 text-amber-700 border border-amber-500/20 text-[11px]">
+                    ● {visibleReserved} reservados
+                  </span>
+                )}
+                {searchNumber && (
+                  <span className="px-2 py-0.5 rounded-full font-bold bg-primary/10 text-primary border border-primary/20 text-[11px] flex items-center gap-1">
+                    Búsqueda: &quot;{searchNumber}&quot;
+                    <button
+                      onClick={() => setSearchNumber('')}
+                      className="hover:text-error font-bold"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+                {rangeFilter !== 'all' && (
+                  <button
+                    onClick={() => {
+                      setRangeFilter('all');
+                      setDisplayPage(1);
+                    }}
+                    className="text-primary hover:underline text-[11px] font-bold"
+                  >
+                    (Ver todos los números)
+                  </button>
+                )}
+              </div>
+
+              {/* Selector de cantidad por página si hay muchos boletos */}
+              {filteredNumbers.length > 200 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-on-surface-variant">Por página:</span>
+                  <div className="flex gap-1">
+                    {[200, 500, 1000].map((sz) => (
+                      <button
+                        key={sz}
+                        onClick={() => {
+                          setPageSize(sz);
+                          setDisplayPage(1);
+                        }}
+                        className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                          pageSize === sz
+                            ? 'bg-primary text-on-primary shadow-sm'
+                            : 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant'
+                        }`}
+                      >
+                        {sz}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => {
+                        setPageSize(999999);
+                        setDisplayPage(1);
+                      }}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                        pageSize >= 999999
+                          ? 'bg-primary text-on-primary shadow-sm'
+                          : 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant'
+                      }`}
+                    >
+                      Todos
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant/30">
-            <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-2">
-              {filteredNumbers.map((item) => (
-                <button
-                  key={item.number}
-                  onClick={() => setSelectedNumber(item.number)}
-                  className={`h-11 rounded-lg font-raffle-number text-xs font-bold transition-all flex items-center justify-center ${
-                    item.status === 'sold'
-                      ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20 line-through'
-                      : item.status === 'reserved'
-                      ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                      : 'bg-surface-container-low hover:bg-surface-container-high text-primary border border-outline-variant/40'
-                  }`}
-                >
-                  {item.number}
-                </button>
-              ))}
+          {/* Grilla de Números del Talonario */}
+          {paginatedNumbers.length > 0 ? (
+            <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/30 shadow-sm space-y-4">
+              <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-2">
+                {paginatedNumbers.map((item) => (
+                  <button
+                    key={item.number}
+                    onClick={() => setSelectedNumber(item.number)}
+                    title={
+                      item.status === 'sold'
+                        ? `Boleto #${item.number} - Vendido a ${item.owner || 'Comprador'}`
+                        : item.status === 'reserved'
+                        ? `Boleto #${item.number} - Reservado (${item.owner || 'Pendiente'})`
+                        : `Boleto #${item.number} - Disponible para venta`
+                    }
+                    className={`h-11 rounded-xl font-raffle-number text-xs font-bold transition-all flex items-center justify-center relative group active:scale-95 ${
+                      item.status === 'sold'
+                        ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 border border-rose-500/30 line-through'
+                        : item.status === 'reserved'
+                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 border border-amber-500/30'
+                        : 'bg-surface-container-low hover:bg-primary hover:text-on-primary text-primary border border-outline-variant/40 hover:shadow-md'
+                    }`}
+                  >
+                    {item.number}
+                  </button>
+                ))}
+              </div>
+
+              {/* Controles de Paginación */}
+              {totalPages > 1 && (
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-outline-variant/20">
+                  <span className="text-xs text-on-surface-variant font-medium">
+                    Página <strong>{displayPage}</strong> de <strong>{totalPages}</strong> ({filteredNumbers.length} números en total)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setDisplayPage((p) => Math.max(1, p - 1))}
+                      disabled={displayPage === 1}
+                      className="px-3 py-1.5 border border-outline-variant rounded-lg text-xs font-bold bg-surface-container hover:bg-surface-container-high transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setDisplayPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={displayPage >= totalPages}
+                      className="px-3 py-1.5 border border-outline-variant rounded-lg text-xs font-bold bg-surface-container hover:bg-surface-container-high transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      Siguiente
+                      <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="bg-surface-container-lowest p-8 rounded-2xl text-center border border-outline-variant/30 space-y-3">
+              <span className="material-symbols-outlined text-[42px] text-on-surface-variant">search_off</span>
+              <h4 className="font-headline-md text-base font-bold text-primary">
+                No se encontraron números con los filtros actuales
+              </h4>
+              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                No hay boletos que coincidan con la búsqueda o el filtro de estado seleccionado.
+              </p>
+              <button
+                onClick={() => {
+                  setSearchNumber('');
+                  setStatusFilter('all');
+                  setRangeFilter('all');
+                  setDisplayPage(1);
+                }}
+                className="px-4 py-2 bg-primary text-on-primary rounded-xl text-xs font-bold shadow hover:bg-primary/90 transition-all"
+              >
+                Restablecer todos los filtros
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1300,6 +1680,120 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Detalle de Boleto Seleccionado */}
+      {selectedTicket && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-6 shadow-2xl border border-outline-variant/30 space-y-5 animate-in zoom-in-95">
+            {/* Header */}
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-raffle-number font-black text-2xl shadow-inner">
+                  #{selectedTicket.number}
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant block">
+                    Boleto de Rifa
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      selectedTicket.status === 'sold'
+                        ? 'bg-rose-500/10 text-rose-700 border border-rose-500/20'
+                        : selectedTicket.status === 'reserved'
+                        ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20'
+                        : 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20'
+                    }`}
+                  >
+                    ● {selectedTicket.status === 'sold' ? 'Vendido' : selectedTicket.status === 'reserved' ? 'Reservado' : 'Disponible'}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedNumber(null)}
+                className="text-on-surface-variant hover:text-primary p-1.5 rounded-lg hover:bg-surface-container transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Body */}
+            {selectedTicket.status === 'sold' || selectedTicket.status === 'reserved' ? (
+              <div className="space-y-3 bg-surface-container-low p-4 rounded-xl border border-outline-variant/30 text-xs">
+                <div className="flex justify-between py-1 border-b border-outline-variant/20">
+                  <span className="text-on-surface-variant font-medium">Comprador:</span>
+                  <span className="font-bold text-primary">{selectedTicket.owner || 'Comprador'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-outline-variant/20">
+                  <span className="text-on-surface-variant font-medium">Correo:</span>
+                  <span className="font-bold text-primary truncate max-w-[200px]">{selectedTicket.email || 'Sin correo'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-outline-variant/20">
+                  <span className="text-on-surface-variant font-medium">Teléfono:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-primary">{selectedTicket.phone || 'Sin teléfono'}</span>
+                    {selectedTicket.phone && (
+                      <a
+                        href={`https://wa.me/57${selectedTicket.phone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold flex items-center gap-0.5 shadow-sm transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">chat</span>
+                        WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </div>
+                {selectedTicket.orderNumber && (
+                  <div className="flex justify-between py-1 border-b border-outline-variant/20">
+                    <span className="text-on-surface-variant font-medium">No. Orden:</span>
+                    <span className="font-mono font-bold text-primary">{selectedTicket.orderNumber}</span>
+                  </div>
+                )}
+                {selectedTicket.orderDate && (
+                  <div className="flex justify-between py-1">
+                    <span className="text-on-surface-variant font-medium">Fecha de Compra:</span>
+                    <span className="font-medium text-on-surface-variant">{selectedTicket.orderDate}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl space-y-2 text-xs text-emerald-900">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
+                  Boleto libre para la venta
+                </p>
+                <p className="text-emerald-800">
+                  Este número está disponible para ser adquirido por cualquier comprador en la tienda online o asignado manualmente.
+                </p>
+                <div className="pt-1 text-sm font-extrabold text-emerald-950">
+                  Precio oficial: ${raffle.pricePerNumber.toLocaleString('es-CO')} COP
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex gap-2">
+              {selectedTicket.orderId && (
+                <button
+                  onClick={() => handleResendOrderEmail(selectedTicket.orderId!)}
+                  disabled={resendingOrderId === selectedTicket.orderId}
+                  className="flex-1 py-2.5 px-3 bg-primary text-on-primary rounded-xl font-bold text-xs hover:bg-primary/90 transition-all flex items-center justify-center gap-1 shadow disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[16px]">forward_to_inbox</span>
+                  {resendingOrderId === selectedTicket.orderId ? 'Enviando...' : 'Reenviar Boletos'}
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedNumber(null)}
+                className="flex-1 py-2.5 px-3 bg-surface-container hover:bg-surface-container-high text-primary rounded-xl font-bold text-xs transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
