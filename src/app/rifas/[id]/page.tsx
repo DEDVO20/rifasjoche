@@ -720,14 +720,6 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
     }
   };
 
-  if (isLoading || !raffle) {
-    return (
-      <div className="space-y-6 py-12 text-center text-primary font-bold text-lg">
-        Cargando detalles de la rifa desde Supabase...
-      </div>
-    );
-  }
-
   // Opciones dinámicas de rango según el total de números y tamaño de bloque
   const rangeOptions = useMemo(() => {
     if (!raffle || !raffle.totalNumbers) return [];
@@ -822,7 +814,15 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
     return ticketNumbers.find((t) => t.number === selectedNumber) || null;
   }, [selectedNumber, ticketNumbers]);
 
-  const percentSold = raffle.totalNumbers > 0 ? Math.round((raffle.soldCount / raffle.totalNumbers) * 100) : 0;
+  const percentSold = raffle && raffle.totalNumbers > 0 ? Math.round((raffle.soldCount / raffle.totalNumbers) * 100) : 0;
+
+  if (isLoading || !raffle) {
+    return (
+      <div className="space-y-6 py-12 text-center text-primary font-bold text-lg">
+        Cargando detalles de la rifa desde Supabase...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-gutter">
