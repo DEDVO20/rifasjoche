@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 function maskName(name: string): string {
   if (!name || name.trim() === '' || name === 'Cliente' || name === 'Comprador') {
@@ -186,12 +187,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ tickets: [] });
     }
 
-    // 6. Cargar todos los boletos asociados a estas órdenes
-    const { data: ticketsData } = await supabase
-      .from('raffle_numbers')
-      .select('order_id, number')
-      .in('order_id', finalOrderIds)
-      .order('number', { ascending: true });
+    // 6. Cargar todos los boletos asociados a estas órdenes (con paginación completa)
+    const ticketsData = await fetchAllRows((from, to) =>
+      supabase
+        .from('raffle_numbers')
+        .select('order_id, number')
+        .in('order_id', finalOrderIds)
+        .order('number', { ascending: true })
+        .range(from, to)
+    );
 
     const ticketsByOrder = new Map<number, string[]>();
     (ticketsData || []).forEach((row: any) => {

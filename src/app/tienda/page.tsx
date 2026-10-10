@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 interface InstantPrize {
   number: string;
@@ -51,12 +52,15 @@ export default function TiendaPublicaPage() {
       if (!error && data && data.length > 0) {
         const raffleIds = data.map((r: any) => r.id);
 
-        // Conteo real de boletos vendidos en public.raffle_numbers
-        const { data: soldNumbers } = await supabase
-          .from('raffle_numbers')
-          .select('raffle_id')
-          .in('raffle_id', raffleIds)
-          .eq('status', 'sold');
+        // Conteo real de boletos vendidos en public.raffle_numbers (con paginación completa)
+        const soldNumbers = await fetchAllRows((from, to) =>
+          supabase
+            .from('raffle_numbers')
+            .select('raffle_id')
+            .in('raffle_id', raffleIds)
+            .eq('status', 'sold')
+            .range(from, to)
+        );
 
         const soldCountMap = new Map<number, number>();
         (soldNumbers || []).forEach((item: any) => {

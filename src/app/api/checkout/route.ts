@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 export async function POST(req: NextRequest) {
   try {
@@ -86,9 +87,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Generar números aleatorios únicos disponibles
-    // Consultar números ya reservados/vendidos y números premiados de la rifa
-    const [soldRes, prizesRes] = await Promise.all([
-      supabase.from('raffle_numbers').select('number').eq('raffle_id', raffleId),
+    // Consultar números ya reservados/vendidos y números premiados de la rifa (con paginación completa)
+    const [soldNumbers, prizesRes] = await Promise.all([
+      fetchAllRows((from, to) =>
+        supabase
+          .from('raffle_numbers')
+          .select('number')
+          .eq('raffle_id', raffleId)
+          .range(from, to)
+      ),
       supabase
         .from('raffle_prizes')
         .select('rule_value')
@@ -96,7 +103,7 @@ export async function POST(req: NextRequest) {
         .eq('rule_type', 'specific_number'),
     ]);
 
-    const takenSet = new Set((soldRes.data || []).map((r: any) => r.number));
+    const takenSet = new Set((soldNumbers || []).map((r: any) => r.number));
     const totalPossible = raffle.total_numbers || 10000;
     const numberLength = raffle.number_length || 4;
     const availableCount = Math.max(0, totalPossible - takenSet.size);

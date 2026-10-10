@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 import { useToast } from '@/context/ToastContext';
 
 interface OrderSale {
@@ -75,14 +76,20 @@ export default function VentasPage() {
             ? supabase.from('raffles').select('id, name').in('id', raffleIds)
             : Promise.resolve({ data: [], error: null }),
           supabase.from('payments').select('order_id, provider, metadata, status').in('order_id', orderIds),
-          supabase.from('raffle_numbers').select('order_id, number').in('order_id', orderIds).order('number', { ascending: true }),
+          fetchAllRows((from, to) =>
+            supabase
+              .from('raffle_numbers')
+              .select('order_id, number')
+              .in('order_id', orderIds)
+              .order('number', { ascending: true })
+              .range(from, to)
+          ),
         ]);
 
         const relatedErrors = [
           profilesResult.error,
           rafflesResult.error,
           paymentsResult.error,
-          numbersResult.error,
         ].filter(Boolean);
 
         if (relatedErrors.length > 0) {
@@ -99,7 +106,7 @@ export default function VentasPage() {
         });
 
         const numbersByOrderId = new Map<number, string[]>();
-        (numbersResult.data || []).forEach((row: any) => {
+        (numbersResult || []).forEach((row: any) => {
           const current = numbersByOrderId.get(row.order_id) || [];
           current.push(row.number);
           numbersByOrderId.set(row.order_id, current);

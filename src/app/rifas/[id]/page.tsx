@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 interface TicketNumber {
   number: string;
@@ -139,11 +140,14 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         }
       }
 
-      // 2. Obtener los boletos vendidos/reservados reales en raffle_numbers
-      const { data: soldNumbersData } = await supabase
-        .from('raffle_numbers')
-        .select('*')
-        .eq('raffle_id', params.id);
+      // 2. Obtener los boletos vendidos/reservados reales en raffle_numbers (paginando para superar el límite de 1000 filas)
+      const soldNumbersData = await fetchAllRows((from, to) =>
+        supabase
+          .from('raffle_numbers')
+          .select('*')
+          .eq('raffle_id', params.id)
+          .range(from, to)
+      );
 
       // 3. Obtener órdenes reales de compra de esta rifa (soporta clientes registrados e invitados)
       const { data: rawOrdersData, error: ordersErr } = await supabase
@@ -176,7 +180,14 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
             ? supabase.from('profiles').select('id, full_name, email, phone').in('id', userIds)
             : Promise.resolve({ data: [], error: null }),
           supabase.from('payments').select('order_id, provider, metadata, status').in('order_id', orderIds),
-          supabase.from('raffle_numbers').select('order_id, number').in('order_id', orderIds).order('number', { ascending: true }),
+          fetchAllRows((from, to) =>
+            supabase
+              .from('raffle_numbers')
+              .select('order_id, number')
+              .in('order_id', orderIds)
+              .order('number', { ascending: true })
+              .range(from, to)
+          ),
         ]);
 
         const profilesById = new Map((profilesResult.data || []).map((p: any) => [p.id, p]));
@@ -188,7 +199,7 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         });
 
         const numbersByOrderId = new Map<number, string[]>();
-        (numbersResult.data || []).forEach((row: any) => {
+        (numbersResult || []).forEach((row: any) => {
           const cur = numbersByOrderId.get(row.order_id) || [];
           cur.push(row.number);
           numbersByOrderId.set(row.order_id, cur);
@@ -272,9 +283,20 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
           orderId: row.order_id ? row.order_id.toString() : undefined,
           orderDate: ordInfo?.orderDate,
         };
-        soldDetailsMap.set(row.number, data);
-        const trimmed = row.number.replace(/^0+/, '') || '0';
-        soldDetailsMap.set(trimmed, data);
+        if (row.number) {
+          soldDetailsMap.set(row.number, data);
+          const trimmed = row.number.replace(/^0+/, '') || '0';
+          soldDetailsMap.set(trimmed, data);
+          const parsed = parseInt(row.number, 10);
+          if (!isNaN(parsed)) {
+            soldDetailsMap.set(parsed.toString(), data);
+            const numLen = raffleData.number_length || 4;
+            soldDetailsMap.set(parsed.toString().padStart(numLen, '0'), data);
+          }
+        }
+        if (row.numeric_value !== undefined && row.numeric_value !== null) {
+          soldDetailsMap.set(row.numeric_value.toString(), data);
+        }
       });
 
       // Calcular métricas reales

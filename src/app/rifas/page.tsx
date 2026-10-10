@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { RafflePrize } from '@/types/database.types';
 import { useToast } from '@/context/ToastContext';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 interface RaffleItem {
   id: number;
@@ -90,12 +91,15 @@ export default function GestorRifasPage() {
       if (!error && rafflesData && rafflesData.length > 0) {
         const raffleIds = rafflesData.map((r: any) => r.id);
 
-        // Consultar boletos vendidos reales de cada rifa
-        const { data: soldNumbers } = await supabase
-          .from('raffle_numbers')
-          .select('raffle_id')
-          .in('raffle_id', raffleIds)
-          .eq('status', 'sold');
+        // Consultar boletos vendidos reales de cada rifa (con paginación completa)
+        const soldNumbers = await fetchAllRows((from, to) =>
+          supabase
+            .from('raffle_numbers')
+            .select('raffle_id')
+            .in('raffle_id', raffleIds)
+            .eq('status', 'sold')
+            .range(from, to)
+        );
 
         const soldMap = new Map<number, number>();
         (soldNumbers || []).forEach((item: any) => {

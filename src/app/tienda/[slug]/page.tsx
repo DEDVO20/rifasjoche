@@ -6,6 +6,7 @@ import CustomerNavbar from '@/components/layout/CustomerNavbar';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 
 interface PublicPrize {
   name: string;
@@ -96,11 +97,14 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
       const { data, error } = await query.single();
 
       if (!error && data) {
-        // Consultar boletos ya ocupados (vendidos o reservados)
-        const { data: takenNumbers } = await supabase
-          .from('raffle_numbers')
-          .select('number')
-          .eq('raffle_id', data.id);
+        // Consultar boletos ya ocupados (vendidos o reservados) con paginación
+        const takenNumbers = await fetchAllRows((from, to) =>
+          supabase
+            .from('raffle_numbers')
+            .select('number')
+            .eq('raffle_id', data.id)
+            .range(from, to)
+        );
 
         const totalNums = data.total_numbers || 1000;
         const takenCount = (takenNumbers || []).length;
