@@ -19,6 +19,7 @@ interface PublicInstantPrize {
   number: string;
   prizeName: string;
   valueText: string;
+  isSold?: boolean;
 }
 
 interface PublicRaffleDetail {
@@ -124,12 +125,41 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
         }));
 
         // 2. Números Premiados Directos / Premios Anticipados
+        const numLength = data.number_length || (totalNums > 0 ? (totalNums - 1).toString().length : 4);
+        const takenNumbersSet = new Set<string>();
+        (takenNumbers || []).forEach((t: any) => {
+          if (t.number) {
+            const clean = t.number.trim();
+            takenNumbersSet.add(clean);
+            takenNumbersSet.add(clean.replace(/^0+/, '') || '0');
+            const numInt = parseInt(clean, 10);
+            if (!isNaN(numInt)) {
+              takenNumbersSet.add(numInt.toString());
+              takenNumbersSet.add(numInt.toString().padStart(numLength, '0'));
+            }
+          }
+        });
+
         const instantPrizesRaw = rawPrizes.filter((p: any) => p.rule_type === 'specific_number');
-        const formattedInstantPrizes: PublicInstantPrize[] = instantPrizesRaw.map((p: any) => ({
-          number: p.rule_value || '0000',
-          prizeName: p.name || 'Premio Sorpresa',
-          valueText: p.prize_value ? `$${Number(p.prize_value).toLocaleString('es-CO')} COP` : 'Premio Directo',
-        }));
+        const formattedInstantPrizes: PublicInstantPrize[] = instantPrizesRaw.map((p: any) => {
+          const rawNum = (p.rule_value || '').trim();
+          const trimmedNum = rawNum.replace(/^0+/, '') || '0';
+          const numInt = parseInt(rawNum, 10);
+          const paddedNum = !isNaN(numInt) ? numInt.toString().padStart(numLength, '0') : rawNum;
+
+          const isSold =
+            takenNumbersSet.has(rawNum) ||
+            takenNumbersSet.has(trimmedNum) ||
+            takenNumbersSet.has(paddedNum) ||
+            (!isNaN(numInt) && takenNumbersSet.has(numInt.toString()));
+
+          return {
+            number: p.rule_value || '0000',
+            prizeName: p.name || 'Premio Sorpresa',
+            valueText: p.prize_value ? `$${Number(p.prize_value).toLocaleString('es-CO')} COP` : 'Premio Directo',
+            isSold,
+          };
+        });
 
         const rawMinQty = data.minimum_numbers_per_order || 1;
         const rawMaxQty = data.maximum_numbers_per_order || totalNums;
@@ -477,17 +507,49 @@ export default function PublicTicketSelectionPage({ params }: { params: { slug: 
                 {raffle.instantPrizes.map((ip, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl border border-amber-300/80 shadow-sm flex items-center justify-between gap-3"
+                    className={`p-3.5 rounded-xl border shadow-sm flex items-center justify-between gap-3 transition-all ${
+                      ip.isSold
+                        ? 'bg-slate-50/90 border-slate-300/80 opacity-80'
+                        : 'bg-gradient-to-br from-amber-50 to-amber-100/50 border-amber-300/80 hover:shadow-md'
+                    }`}
                   >
                     <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
-                        Premio Directo
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                          Premio Directo
+                        </span>
+                        {ip.isSold ? (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300 uppercase tracking-tight">
+                            ● Ya Vendido
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase tracking-tight">
+                            ● ¡En Juego!
+                          </span>
+                        )}
+                      </div>
+                      <h5 className={`font-bold text-xs line-clamp-1 ${ip.isSold ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
+                        {ip.prizeName}
+                      </h5>
+                      <span className={`text-xs font-extrabold ${ip.isSold ? 'text-slate-600' : 'text-amber-900'}`}>
+                        {ip.valueText}
                       </span>
-                      <h5 className="font-bold text-xs text-slate-900 line-clamp-1">{ip.prizeName}</h5>
-                      <span className="text-xs font-extrabold text-amber-900">{ip.valueText}</span>
                     </div>
-                    <div className="bg-amber-500 text-slate-950 px-2.5 py-1.5 rounded-lg font-mono font-black text-sm shadow-sm flex-shrink-0">
-                      #{ip.number}
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <div
+                        className={`px-2.5 py-1.5 rounded-lg font-mono font-black text-sm shadow-sm ${
+                          ip.isSold
+                            ? 'bg-slate-200 text-slate-500 line-through border border-slate-300'
+                            : 'bg-amber-500 text-slate-950'
+                        }`}
+                      >
+                        #{ip.number}
+                      </div>
+                      {ip.isSold && (
+                        <span className="text-[9px] font-black text-rose-600 uppercase tracking-wider">
+                          Vendido
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

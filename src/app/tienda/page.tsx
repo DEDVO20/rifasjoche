@@ -10,6 +10,7 @@ interface InstantPrize {
   number: string;
   name: string;
   value: number;
+  isSold?: boolean;
 }
 
 interface PublicRaffle {
@@ -52,19 +53,30 @@ export default function TiendaPublicaPage() {
       if (!error && data && data.length > 0) {
         const raffleIds = data.map((r: any) => r.id);
 
-        // Conteo real de boletos vendidos en public.raffle_numbers (con paginación completa)
+        // Conteo real de boletos vendidos y números en public.raffle_numbers (con paginación completa)
         const soldNumbers = await fetchAllRows((from, to) =>
           supabase
             .from('raffle_numbers')
-            .select('raffle_id')
+            .select('raffle_id, number')
             .in('raffle_id', raffleIds)
             .eq('status', 'sold')
             .range(from, to)
         );
 
         const soldCountMap = new Map<number, number>();
+        const soldTicketKeys = new Set<string>();
+
         (soldNumbers || []).forEach((item: any) => {
           soldCountMap.set(item.raffle_id, (soldCountMap.get(item.raffle_id) || 0) + 1);
+          if (item.number) {
+            const clean = item.number.trim();
+            soldTicketKeys.add(`${item.raffle_id}_${clean}`);
+            soldTicketKeys.add(`${item.raffle_id}_${clean.replace(/^0+/, '') || '0'}`);
+            const numInt = parseInt(clean, 10);
+            if (!isNaN(numInt)) {
+              soldTicketKeys.add(`${item.raffle_id}_${numInt}`);
+            }
+          }
         });
 
         const mapped: PublicRaffle[] = data.map((item: any) => {
@@ -76,11 +88,21 @@ export default function TiendaPublicaPage() {
 
           const instantPrizes: InstantPrize[] = (item.raffle_prizes || [])
             .filter((p: any) => p.rule_type === 'specific_number')
-            .map((p: any) => ({
-              number: p.rule_value || '',
-              name: p.name || 'Premio Anticipado',
-              value: Number(p.prize_value) || 0,
-            }));
+            .map((p: any) => {
+              const cleanNum = (p.rule_value || '').trim();
+              const numInt = parseInt(cleanNum, 10);
+              const isSold =
+                soldTicketKeys.has(`${item.id}_${cleanNum}`) ||
+                soldTicketKeys.has(`${item.id}_${cleanNum.replace(/^0+/, '') || '0'}`) ||
+                (!isNaN(numInt) && soldTicketKeys.has(`${item.id}_${numInt}`));
+
+              return {
+                number: cleanNum || '',
+                name: p.name || 'Premio Anticipado',
+                value: Number(p.prize_value) || 0,
+                isSold,
+              };
+            });
 
           return {
             id: item.id,
@@ -256,12 +278,25 @@ export default function TiendaPublicaPage() {
                             {raffle.instantPrizes.map((ip, i) => (
                               <span
                                 key={i}
-                                className="px-2 py-1 bg-amber-100/90 text-amber-950 rounded-lg text-xs font-mono font-black border border-amber-300 shadow-sm flex items-center gap-1"
+                                className={`px-2 py-1 rounded-lg text-xs font-mono font-black border shadow-sm flex items-center gap-1.5 transition-all ${
+                                  ip.isSold
+                                    ? 'bg-rose-50/90 text-rose-900 border-rose-200 opacity-90'
+                                    : 'bg-amber-100/90 text-amber-950 border-amber-300'
+                                }`}
                               >
-                                #{ip.number}
-                                <span className="text-[10px] font-semibold text-amber-800 font-sans">
+                                <span className={ip.isSold ? 'line-through text-rose-800' : ''}>#{ip.number}</span>
+                                <span className="text-[10px] font-semibold font-sans">
                                   ({ip.name})
                                 </span>
+                                {ip.isSold ? (
+                                  <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-200 text-rose-950 uppercase">
+                                    Vendido
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-950 uppercase">
+                                    ¡En juego!
+                                  </span>
+                                )}
                               </span>
                             ))}
                           </div>

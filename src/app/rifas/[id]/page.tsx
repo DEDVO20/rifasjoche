@@ -26,6 +26,9 @@ interface Prize {
   ruleType?: string;
   ruleValue?: string;
   winningNumber?: string;
+  isSold?: boolean;
+  soldTo?: string;
+  orderNumber?: string;
 }
 
 interface SaleOrder {
@@ -434,22 +437,39 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
         setIsWinnerNotFound(false);
       }
 
-      // 4. Mapear Premios reales
-      const realPrizes: Prize[] = (raffleData.raffle_prizes || []).map((p: any) => ({
-        id: p.id,
-        position: p.position || 1,
-        name: p.name || 'Premio',
-        type: p.prize_type === 'main' ? 'main' : 'secondary',
-        value: Number(p.prize_value) || 0,
-        ruleType: p.rule_type,
-        ruleValue: p.rule_value,
-        rule: p.rule_type === 'exact_match'
-          ? `Coincidencia exacta con ${raffleData.lottery_draws?.lotteries?.name || 'Lotería Oficial'}`
-          : p.rule_type === 'specific_number'
-          ? `🎯 Número Premiado: #${p.rule_value || '0000'} (Premio Anticipado / Directo)`
-          : `Regla especial ${p.rule_type}`,
-        winningNumber: p.rule_type === 'specific_number' ? p.rule_value : (p.winning_number || undefined),
-      }));
+      // 4. Mapear Premios reales con detección de estado vendido
+      const realPrizes: Prize[] = (raffleData.raffle_prizes || []).map((p: any) => {
+        const cleanVal = (p.rule_value || '').trim();
+        const trimmed = cleanVal.replace(/^0+/, '') || '0';
+        const numVal = parseInt(cleanVal, 10);
+        const numLen = raffleData.number_length || (totalNums > 0 ? (totalNums - 1).toString().length : 4);
+        const padded = !isNaN(numVal) ? numVal.toString().padStart(numLen, '0') : cleanVal;
+
+        const soldInfo =
+          soldDetailsMap.get(cleanVal) ||
+          soldDetailsMap.get(trimmed) ||
+          soldDetailsMap.get(padded) ||
+          (!isNaN(numVal) ? soldDetailsMap.get(numVal.toString()) : undefined);
+
+        return {
+          id: p.id,
+          position: p.position || 1,
+          name: p.name || 'Premio',
+          type: p.prize_type === 'main' ? 'main' : 'secondary',
+          value: Number(p.prize_value) || 0,
+          ruleType: p.rule_type,
+          ruleValue: p.rule_value,
+          rule: p.rule_type === 'exact_match'
+            ? `Coincidencia exacta con ${raffleData.lottery_draws?.lotteries?.name || 'Lotería Oficial'}`
+            : p.rule_type === 'specific_number'
+            ? `🎯 Número Premiado: #${p.rule_value || '0000'} (Premio Anticipado / Directo)`
+            : `Regla especial ${p.rule_type}`,
+          winningNumber: p.rule_type === 'specific_number' ? p.rule_value : (p.winning_number || undefined),
+          isSold: Boolean(soldInfo),
+          soldTo: soldInfo?.owner,
+          orderNumber: soldInfo?.orderNumber,
+        };
+      });
 
       setPrizes(realPrizes);
 
@@ -1448,19 +1468,49 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
                   .map((p) => (
                     <div
                       key={p.id}
-                      className="p-4 bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-amber-500/5 rounded-2xl border border-amber-400/50 shadow-sm space-y-2"
+                      className={`p-4 rounded-2xl border shadow-sm space-y-2 transition-all ${
+                        p.isSold
+                          ? 'bg-slate-50 border-slate-300 opacity-90'
+                          : 'bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-amber-500/5 border-amber-400/50'
+                      }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase font-black tracking-wider text-amber-800">
-                          Premio Directo
-                        </span>
-                        <div className="font-mono font-black text-amber-900 text-base bg-amber-200 px-2 py-0.5 rounded-lg">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] uppercase font-black tracking-wider text-amber-800">
+                            Premio Directo
+                          </span>
+                          {p.isSold ? (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-300 uppercase">
+                              🔴 Vendido
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase">
+                              🟢 Disponible
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`font-mono font-black text-base px-2 py-0.5 rounded-lg ${
+                            p.isSold
+                              ? 'bg-slate-200 text-slate-600 line-through'
+                              : 'bg-amber-200 text-amber-900'
+                          }`}
+                        >
                           #{p.ruleValue || p.winningNumber || '0000'}
                         </div>
                       </div>
-                      <h4 className="font-bold text-sm text-primary line-clamp-1">{p.name}</h4>
-                      <div className="font-extrabold text-sm text-emerald-700">
-                        ${p.value.toLocaleString('es-CO')} COP
+                      <h4 className={`font-bold text-sm line-clamp-1 ${p.isSold ? 'text-slate-600' : 'text-primary'}`}>
+                        {p.name}
+                      </h4>
+                      <div className="flex items-center justify-between pt-1 border-t border-outline-variant/10">
+                        <div className="font-extrabold text-sm text-emerald-700">
+                          ${p.value.toLocaleString('es-CO')} COP
+                        </div>
+                        {p.isSold && p.soldTo && (
+                          <span className="text-[11px] font-bold text-slate-700 truncate max-w-[130px]" title={p.soldTo}>
+                            👤 {p.soldTo}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))
@@ -1740,6 +1790,39 @@ export default function DetalleRifaPage({ params }: { params: { id: string } }) 
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
+
+            {/* Banner si el boleto es un Número Premiado Anticipado */}
+            {(() => {
+              const linkedInstantPrize = prizes.find(
+                (p) =>
+                  p.ruleType === 'specific_number' &&
+                  (p.ruleValue === selectedTicket.number ||
+                    parseInt(p.ruleValue || '', 10) === parseInt(selectedTicket.number, 10))
+              );
+              if (!linkedInstantPrize) return null;
+              return (
+                <div className="bg-amber-100/90 border border-amber-300 p-3 rounded-xl flex items-center justify-between text-xs text-amber-950 font-bold shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-amber-600 text-[18px]">stars</span>
+                    <div>
+                      <span className="text-amber-900 block font-black">🎯 ¡Número Premiado Anticipado!</span>
+                      <span className="text-[11px] font-normal text-amber-800">
+                        {linkedInstantPrize.name} — ${linkedInstantPrize.value.toLocaleString('es-CO')} COP
+                      </span>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-[10px] uppercase font-black px-2 py-0.5 rounded-full border ${
+                      selectedTicket.status === 'sold'
+                        ? 'bg-rose-100 text-rose-800 border-rose-300'
+                        : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    }`}
+                  >
+                    {selectedTicket.status === 'sold' ? 'Ganado' : '¡En Juego!'}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* Body */}
             {selectedTicket.status === 'sold' || selectedTicket.status === 'reserved' ? (
